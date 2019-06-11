@@ -1,0 +1,8 @@
+chain:
+  * A can create a cat (id, name, price)
+  * B can purchase a cat from A after paying A price
+
+chain-ui:
+  * show # of cats available for sold
+  * a button that B can purchase it
+    L how do you represent a user in the browser?
