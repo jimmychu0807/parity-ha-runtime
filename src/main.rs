@@ -11,11 +11,11 @@ pub use substrate_cli::{VersionInfo, IntoExit, error};
 
 fn run() -> cli::error::Result<()> {
 	let version = VersionInfo {
-		name: "Substrate Node",
+		name: "Collectible on Auction",
 		commit: env!("VERGEN_SHA_SHORT"),
 		version: env!("CARGO_PKG_VERSION"),
 		executable_name: "chain01",
-		author: "jimmychu",
+		author: "Jimmy Chu",
 		description: "chain01",
 		support_url: "support.anonymous.an",
 	};

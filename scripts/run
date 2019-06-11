@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+
+CLEAN_FLAG = ARGV[0];
+
+if (CLEAN_FLAG == "clean")
+  system("./target/release/chain01 purge-chain --dev && ./target/release/chain01 --dev");
+else
+  system("./target/release/chain01 --dev");
+end
