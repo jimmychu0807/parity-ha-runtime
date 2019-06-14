@@ -11,6 +11,8 @@
 use support::{decl_module, decl_storage, decl_event, dispatch::Result,
   StorageValue, StorageMap, ensure };
 use system::ensure_signed;
+
+// this is needed when you want to use Vec and Box
 use rstd::prelude::*;
 use runtime_primitives::traits::{ As, Hash };
 use parity_codec::{ Encode, Decode };
@@ -47,7 +49,7 @@ decl_storage! {
   trait Store for Module<T: Trait> as CatAuction {
     Kitties get(kitties): map T::Hash => Kitty<T::Hash, T::Balance>;
     KittyOwner get(owner_of): map T::Hash => Option<T::AccountId>;
-    OwnedKitties get(kitties_owned): map T::AccountId => T::Hash;
+    OwnedKitties get(kitties_owned): map T::AccountId => Vec<T::Hash> = Vec::new();
 
     AllKittiesCount get(all_kitties_cnt): u64;
     Nonce: u64;
@@ -80,8 +82,7 @@ decl_module! {
       // add it in the storage
       <Kitties<T>>::insert(kitty_id, &kitty);
       <KittyOwner<T>>::insert(kitty_id, &sender);
-      <OwnedKitties<T>>::insert(&sender, kitty_id);
-
+      <OwnedKitties<T>>::mutate(&sender, |vec| vec.push(kitty_id));
       <AllKittiesCount<T>>::mutate(|cnt| *cnt += 1);
 
       // nonce increment by 1
