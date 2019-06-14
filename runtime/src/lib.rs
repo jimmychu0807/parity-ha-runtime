@@ -207,7 +207,7 @@ construct_runtime!(
 		Balances: balances,
 		Sudo: sudo,
 
-		CatAuctionModule: cat_auction::{ Module, Call, Storage, Event<T> },
+		CatAuction: cat_auction::{ Module, Call, Storage, Event<T> },
 	}
 );
 

@@ -1,5 +1,7 @@
 chain:
   * A can create a cat (id, name, price)
+    + can you store a name?
+    L make user storing kitties in an array
   * B can purchase a cat from A after paying A price
 
 chain-ui:
