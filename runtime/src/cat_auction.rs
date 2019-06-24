@@ -26,7 +26,7 @@ use parity_codec::{ Encode, Decode };
 pub struct Kitty<Hash, Balance> {
   id: Hash,
   name: Option<Vec<u8>>,
-  price: Balance,
+  base_price: Balance, // when 0, it is not for sale
 }
 
 /// The module's configuration trait.
@@ -37,10 +37,15 @@ pub trait Trait: balances::Trait {
 decl_event!(
   pub enum Event<T> where
     <T as system::Trait>::AccountId,
-    <T as system::Trait>::Hash {
+    <T as system::Trait>::Hash, {
+    // <T as balances::Trait>::Balance, {
 
     // Events in our runtime
     Created(AccountId, Hash),
+    ForSale(Hash, u64),
+
+    // FromAccountId, ToAccountId, KittyId
+    Transaction(AccountId, AccountId, Hash, u64),
   }
 );
 
@@ -76,7 +81,7 @@ decl_module! {
       let kitty = Kitty {
         id: kitty_id,
         name: Some(kitty_name),
-        price: <T::Balance as As<u64>>::sa(0),
+        base_price: <T::Balance as As<u64>>::sa(0),
       };
 
       // add it in the storage
@@ -93,6 +98,43 @@ decl_module! {
 
       Ok(())
     } // end of fn `create_kitty`
+
+    pub fn for_sale(origin, kitty_id: T::Hash, base_price: u64) -> Result {
+      let sender = ensure_signed(origin)?;
+
+      // 1. check the origin own the kitty
+      // 2. check the price is > 0
+      let kitty_owner = Self::owner_of(kitty_id).ok_or("Kitty has no owner")?;
+      ensure!(kitty_owner == sender, "The cat is not owned by the requester.");
+      ensure!(base_price > 0, "The price must be set higher than 0.");
+
+      // 3. set the base price of the kitty, write to blockchain
+      <Kitties<T>>::mutate(kitty_id, |kitty| {
+        kitty.base_price = <T::Balance as As<u64>>::sa(base_price);
+      });
+
+      // 4. announce with an event.
+      Self::deposit_event(RawEvent::ForSale(kitty_id, base_price));
+
+      // 5. return
+      Ok(())
+    }
+
+    pub fn cancel_sale(origin, kitty_id: T::Hash) -> Result {
+      let sender = ensure_signed(origin)?;
+
+      // 1. check the origin own the kitty
+      // 2. check the price is > 0
+      let kitty_owner = Self::owner_of(kitty_id).ok_or("Kitty has no owner")?;
+      ensure!(kitty_owner == sender, "The cat is not owned by the requester.");
+
+      // 3. set the base price of the kitty to 0
+      <Kitties<T>>::mutate(kitty_id, |kitty| {
+        kitty.base_price = <T::Balance as As<u64>>::sa(0);
+      });
+
+      Ok(())
+    }
 
   }
 }
