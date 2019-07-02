@@ -168,6 +168,38 @@ decl_module! {
       Ok(())
     } // end of fn `create_kitty`
 
+    pub fn start_auction(origin, kitty_id: T::Hash, end_time: T::Moment,
+      base_price: T::Balance) -> Result {
+
+      let sender = ensure_signed(origin)?;
+      // Check:
+      //  1. ensure kitty exists, and the kitty.owner == sender
+      //  2. kitty is not already `in_auction` state
+      //  3. ensure end_time > current_time
+      //  4. base_price > 0
+
+      // check #1
+      ensure!(<Kitties<T>>::exists(kitty_id), "Kitty does not exist");
+      let kitty = Self::kitties(kitty_id);
+      // check #2
+      ensure!(!kitty.in_auction, "Kitty is already in another auction");
+
+      // check #3
+      let now = <timestamp::Module<T>>::get();
+      ensure!(end_time > now, "End time cannot be set before current time");
+
+      // check #4
+      ensure!(base_price > <T::Balance as As<u64>>::sa(0),
+        "Base price must be set greater than 0");
+
+      // Write:
+      //  1. create the auction
+      //  2. set the kitty state in_auction = true
+
+
+      Ok(())
+    }
+
     // pub fn for_sale(origin, kitty_id: T::Hash, base_price: u64) -> Result {
     //   let sender = ensure_signed(origin)?;
 
