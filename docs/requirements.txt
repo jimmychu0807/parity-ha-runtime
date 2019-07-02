@@ -1,3 +1,10 @@
+- Complete the whole auction lifecycle of a kitty - 20190705
+  L remove kitty creation function, and create 20 kitties for Alice at
+    genesis block
+- display kitties in auction on UI w. react       - 20190708
+- start working on the node listener & cache      - 20190711
+  L revert the UI to query the off-chain cache    - 20190713
+
 On the runtime:
   * Seller can list his kitty to be in auction with a base price, and specify the auction period (with the minimum auction period specified in runtime).
   * Seller can change his mind and cancel the auction if no one has bidden on the kitty
@@ -6,9 +13,15 @@ On the runtime:
   * All bidders except the top 3 bidders in the last period can retreat from the bid, and get their bidding amount back
   * Bidders can always update their bidding amount, but the bidding ranking is not updated until end of every period.
   * Finally, the winning bidder pay the second highest value to purchase the kitty from the seller. Remaining bidding amount are returned to all bidders.
+  * some test case
 
 On the UI:
   Bidding Page: a page showing all kitties under auction in the universe.
-      Each kitty shows the kitty owner, kitty base price, current number of bidders involved, and the ranking of the top 3 bidders.
-      A player can come join the bid, or update his bid.
+    Each kitty shows the kitty owner, kitty base price, current number of bidders involved, and the ranking of the top 3 bidders.
+    A player can come join the bid, or update his bid.
   Result Page: a page showing the history of when a kitty was sold from which player to which player at what price.
+
+Build a small server/listener:
+  - listen to the event from the chain and save as off-chain cache in mongodb
+  - a cron job to do call the substrate node regularly
+  - clean up your hkwtf-staging server
