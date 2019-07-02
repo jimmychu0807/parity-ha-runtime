@@ -4,7 +4,6 @@
 /// If you change the name of this file, make sure to update its references in runtime/src/lib.rs
 /// If you remove this file, you can remove those references
 
-
 /// For more guidance on Substrate modules, see the example module
 /// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
 
@@ -28,8 +27,8 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 pub struct Kitty<Hash, AccountId> {
   id: Hash,
   name: Option<Vec<u8>>,
-  owner: AccountId,
-  owner_pos: u64,
+  owner: Option<AccountId>,
+  owner_pos: Option<u64>,
   in_auction: bool,
 }
 
@@ -41,6 +40,7 @@ pub enum AuctionStatus {
   Closed
 }
 
+// This is necessary so that other structs depend on this enum can be encode/decode with default value.
 impl Default for AuctionStatus {
   fn default() -> Self { AuctionStatus::Ongoing }
 }
@@ -53,7 +53,6 @@ pub struct Auction<Hash, Balance, Moment, AuctionTx> {
   start_time: Moment,
   end_time: Moment,
   status: AuctionStatus,
-  bid_count: u64,
   tx: Option<AuctionTx>,
 }
 
@@ -63,6 +62,7 @@ pub enum BidStatus {
   Withdrawn,
 }
 
+// This is necessary so that other structs depend on this enum can be encode/decode with default value.
 impl Default for BidStatus {
   fn default() -> Self { BidStatus::Active }
 }
@@ -85,17 +85,6 @@ pub struct AuctionTx<Hash, AccountId, Balance, Moment> {
   tx_price: Balance,
 }
 
-decl_event!(
-  pub enum Event<T> where
-    <T as system::Trait>::AccountId,
-    <T as system::Trait>::Hash, {
-    // <T as balances::Trait>::Balance, {
-
-    // Events in our runtime
-    KittyCreated(AccountId, Hash),
-  }
-);
-
 // This module's storage items.
 decl_storage! {
   trait Store for Module<T: Trait> as CatAuction {
@@ -104,8 +93,8 @@ decl_storage! {
     AllKittiesCount get(all_kitties_count): u64 = 0;
 
     // The following two go hand-in-hand, write to one likely need to update the other two
-    OwnedKitties get(owned_kitty): map (T::AccountId, u64) => T::Hash;
-    OwnedKittyCount get(owned_kitty_count): map T::AccountId => u64 = 0;
+    OwnerKitties get(owner_kitties): map (T::AccountId, u64) => T::Hash;
+    OwnerKittiesCount get(owner_kitties_count): map T::AccountId => u64 = 0;
 
     // On Auction
     Auctions get(auctions): map T::Hash => Auction<T::Hash, T::Balance, T::Moment,
@@ -113,52 +102,71 @@ decl_storage! {
     AllAuctionsArray get(auction_array): map u64 => T::Hash;
     AllAuctionsCount get(all_auctions_count): u64 = 0;
 
-    // On auction & bid: (auction_id, index) => bid_id
-    AuctionBids: map (T::Hash, u64) => Option<T::Hash>;
-
     // `bid_id` => Bid object
     Bids get(bids): map T::Hash => Bid<T::Hash, T::AccountId, T::Balance, T::Moment>;
+
+    // On auction & bid: (auction_id, index) => bid_id
+    AuctionBids get(auction_bids): map (T::Hash, u64) => T::Hash;
+    AuctionBidsCount get(auction_bids_count): map T::Hash => u64 = 0;
 
     Nonce: u64 = 0;
     // if you want to initialize value in storage, use genesis block
   }
 }
 
+decl_event!(
+  pub enum Event<T> where
+    <T as system::Trait>::AccountId,
+    <T as system::Trait>::Hash, {
+    // <T as balances::Trait>::Balance, {
+
+    // Events in our runtime
+    KittyCreated(AccountId, Hash, Vec<u8>),
+  }
+);
+
 decl_module! {
   pub struct Module<T: Trait> for enum Call where origin: T::Origin {
     fn deposit_event<T>() = default;
 
-    // pub fn create_kitty(origin, kitty_name: Vec<u8>) -> Result {
-    //   let sender = ensure_signed(origin)?;
+    pub fn create_kitty(origin, kitty_name: Vec<u8>) -> Result {
+      let sender = ensure_signed(origin)?;
 
-    //   // generate a random hash key
-    //   let nonce = <Nonce<T>>::get();
-    //   let random_seed = <system::Module<T>>::random_seed();
-    //   let kitty_id = (random_seed, &sender, nonce).using_encoded(<T as system::Trait>::Hashing::hash);
+      // generate a random hash key
+      let nonce = <Nonce<T>>::get();
+      let random_seed = <system::Module<T>>::random_seed();
+      let kitty_id = (random_seed, &sender, nonce).using_encoded(<T as system::Trait>::Hashing::hash);
 
-    //   // ensure the kitty_id is not existed
-    //   ensure!(!<Kitties<T>>::exists(kitty_id), "Cat with the id existed already");
+      // ensure the kitty_id is not existed
+      ensure!(!<Kitties<T>>::exists(kitty_id), "Cat with the id existed already");
 
-    //   let kitty = Kitty {
-    //     id: kitty_id,
-    //     name: Some(kitty_name),
-    //     base_price: T::Balance::sa(0),
-    //   };
+      let owner_kitties_count = Self::owner_kitties_count(&sender);
 
-    //   // add it in the storage
-    //   <Kitties<T>>::insert(kitty_id, &kitty);
-    //   <KittyOwner<T>>::insert(kitty_id, &sender);
-    //   <OwnedKitties<T>>::mutate(&sender, |vec| vec.push(kitty_id));
-    //   <AllKittiesCount<T>>::mutate(|cnt| *cnt += 1);
+      let kitty = Kitty {
+        id: kitty_id,
+        name: Some(kitty_name.clone()),
+        owner: Some(sender.clone()),
+        owner_pos: Some(owner_kitties_count),
+        in_auction: false,
+      };
 
-    //   // nonce increment by 1
-    //   <Nonce<T>>::mutate(|nonce| *nonce += 1);
+      // update corresponding storage
+      <Kitties<T>>::insert(kitty_id, &kitty);
+      <AllKittiesArray<T>>::insert(Self::all_kitties_count(), &kitty_id);
+      <AllKittiesCount<T>>::mutate(|cnt| *cnt += 1);
 
-    //   // emit an event
-    //   Self::deposit_event(RawEvent::Created(sender, kitty_id));
+      // update OwnerKitties...
+      <OwnerKitties<T>>::insert((sender.clone(), owner_kitties_count), &kitty_id);
+      <OwnerKittiesCount<T>>::mutate(&sender, |cnt| *cnt += 1);
 
-    //   Ok(())
-    // } // end of fn `create_kitty`
+      // nonce increment by 1
+      <Nonce<T>>::mutate(|nonce| *nonce += 1);
+
+      // emit an event
+      Self::deposit_event(RawEvent::KittyCreated(sender, kitty_id, kitty_name));
+
+      Ok(())
+    } // end of fn `create_kitty`
 
     // pub fn for_sale(origin, kitty_id: T::Hash, base_price: u64) -> Result {
     //   let sender = ensure_signed(origin)?;

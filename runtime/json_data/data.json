@@ -1,0 +1,32 @@
+{
+  "AuctionTx": {
+    "auction_id": "Hash",
+    "tx_time": "Moment",
+    "buyer": "AccountId",
+    "tx_price": "AccountId"
+  },
+  "Kitty": {
+    "id": "Hash",
+    "name": "Option<Vec<u8>>",
+    "owner": "Option<AccountId>",
+    "owner_pos": "Option<u64>",
+    "in_auction": "bool"
+  },
+  "Auction": {
+    "id": "u32",
+    "kitty_id": "Hash",
+    "base_price": "Balance",
+    "start_time": "Moment",
+    "end_time": "Moment",
+    "status": "u32",
+    "tx": "Option<AuctionTx>"
+  },
+  "Bid": {
+    "id": "Hash",
+    "auction_id": "Hash",
+    "bidder": "AccountId",
+    "price": "Balance",
+    "last_update": "Moment",
+    "status": "u32"
+  }
+}
