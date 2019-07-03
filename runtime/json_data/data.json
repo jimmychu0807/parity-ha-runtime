@@ -1,9 +1,11 @@
 {
+  "AuctionStatus": "u32",
+  "BidStatus": "u32",
   "AuctionTx": {
     "auction_id": "Hash",
     "tx_time": "Moment",
     "buyer": "AccountId",
-    "tx_price": "AccountId"
+    "tx_price": "Balance"
   },
   "Kitty": {
     "id": "Hash",
@@ -13,12 +15,12 @@
     "in_auction": "bool"
   },
   "Auction": {
-    "id": "u32",
+    "id": "Hash",
     "kitty_id": "Hash",
     "base_price": "Balance",
     "start_time": "Moment",
     "end_time": "Moment",
-    "status": "u32",
+    "status": "AuctionStatus",
     "tx": "Option<AuctionTx>"
   },
   "Bid": {
@@ -27,6 +29,6 @@
     "bidder": "AccountId",
     "price": "Balance",
     "last_update": "Moment",
-    "status": "u32"
+    "status": "BidStatus"
   }
 }
