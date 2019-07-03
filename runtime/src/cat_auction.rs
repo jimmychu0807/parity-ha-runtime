@@ -126,6 +126,7 @@ decl_event!(
     // Events in our runtime
     KittyCreated(AccountId, Hash, Vec<u8>),
     AuctionStarted(AccountId, Hash, Hash, Balance, Moment),
+    AuctionCancelled(Hash),
   }
 );
 
@@ -216,8 +217,23 @@ decl_module! {
       //   2. the now time is before auction end_time
       //   3. No one has bid in the auction yet
 
+      // check #1:
+      ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
+      ensure!(Self::_auction_admin(auction_id) == sender, "You are not the auction admin");
+
+      let auction = Self::auctions(auction_id);
+      let now = <timestamp::Module<T>>::get();
+      // check #2:
+      ensure!(auction.end_time > now, "The auction has passed its end time");
+
+      // check #3:
+      ensure!(Self::auction_bids_count(auction_id) == 0, "Someone has bid already. So this auction cannot be cancelled");
+
       // write:
       //   1. update the auction status to cancelled.
+      <Auctions<T>>::mutate(auction_id, |auction| auction.status = AuctionStatus::Cancelled);
+
+      Self::deposit_event(RawEvent::AuctionCancelled(auction_id));
       Ok(())
     }
 
@@ -271,5 +287,14 @@ impl<T: Trait> Module<T> {
     <AuctionsCount<T>>::mutate(|cnt| *cnt += 1);
 
     Ok(())
+  }
+
+  fn _auction_admin(auction_id: T::Hash) -> T::AccountId {
+    // we use an internal function here, so later on we can modify the logic
+    //   how an auction admin is determined.
+
+    let auction = Self::auctions(auction_id);
+    let kitty = Self::kitties(auction.kitty_id);
+    kitty.owner.unwrap()
   }
 }
