@@ -24,6 +24,9 @@ pub trait Trait: timestamp::Trait + balances::Trait {
   type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
+const TOPMOST_BIDS_LEN: u32 = 3; // store the 3 topmost bids, and they cannot be withdrawn
+const AUCTION_MIN_DURATION: u64 = 5 * 60; // auction duration has to be at least 5 mins
+
 // Our own Cat struct
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
 pub struct Kitty<Hash, AccountId> {
@@ -55,6 +58,11 @@ pub struct Auction<Hash, Balance, Moment, AuctionTx> {
   start_time: Moment,
   end_time: Moment,
   status: AuctionStatus,
+
+  current_topmost_bids: Vec<Hash>,
+  bid_price_to_topmost: Balance,
+  displayed_topmost_bids: Vec<Hash>,
+
   tx: Option<AuctionTx>,
 }
 
@@ -175,7 +183,10 @@ decl_module! {
 
       // check #3
       let now = <timestamp::Module<T>>::get();
-      ensure!(end_time > now, "End time cannot be set before current time");
+
+      // TODO: ideally would be `end_time > now + AUCTION_MIN_DURATION`,
+      //   but not sure how to do moment arithmetic.
+      ensure!(end_time > now, "End time cannot be set less than 5 mins from current time");
 
       // check #4
       ensure!(base_price > <T::Balance as As<u64>>::sa(0),
@@ -194,6 +205,11 @@ decl_module! {
         start_time: now,
         end_time: end_time.clone(),
         status: AuctionStatus::Ongoing,
+
+        current_topmost_bids: Vec::new(),
+        bid_price_to_topmost: <T::Balance as As<u64>>::sa(0),
+        displayed_topmost_bids: Vec::new(),
+
         tx: None,
       };
 
@@ -234,6 +250,31 @@ decl_module! {
       <Auctions<T>>::mutate(auction_id, |auction| auction.status = AuctionStatus::Cancelled);
 
       Self::deposit_event(RawEvent::AuctionCancelled(auction_id));
+      Ok(())
+    } // end of `fn cancel_auction(...)`
+
+    pub fn bid(origin, auction_id: T::Hash, bid_price: T::Balance) -> Result {
+
+      let bidder = ensure_signed(origin)?;
+
+      // check:
+      //   1. bidder is not the kitty owner
+      //   2. bid_price >= base_price
+
+      // check #1
+      ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
+      let auction = Self::auctions(auction_id);
+      let kitty_owner = Self::kitties(auction.kitty_id).owner.ok_or("Kitty does not have owner")?;
+      ensure!(bidder != kitty_owner, "The kitty owner cannot bid in this auction");
+
+      // check #2
+      ensure!(bid_price >= auction.base_price, "The bid price is lower than the auction base price");
+
+      // write to a few storages:
+      //  TODO:
+      //  1. search if he has bid before. If yes, update bid. If not, create a bid
+      //  2.
+
       Ok(())
     }
 

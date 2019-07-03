@@ -1,6 +1,10 @@
 {
-  "AuctionStatus": "u32",
-  "BidStatus": "u32",
+  "AuctionStatus": {
+    "_enum": [ "Ongoing", "Cancelled", "ToBeClaimed", "Closed" ]
+  },
+  "BidStatus": {
+    "_enum": [ "Active", "Withdrawn" ]
+  },
   "AuctionTx": {
     "auction_id": "Hash",
     "tx_time": "Moment",
@@ -21,6 +25,11 @@
     "start_time": "Moment",
     "end_time": "Moment",
     "status": "AuctionStatus",
+
+    "current_topmost_bids": "Vec<Hash>",
+    "bid_price_to_topmost": "Balance",
+    "displayed_topmost_bids": "Vec<Hash>",
+
     "tx": "Option<AuctionTx>"
   },
   "Bid": {
