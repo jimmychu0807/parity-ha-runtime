@@ -137,28 +137,17 @@ decl_module! {
       let sender = ensure_signed(origin)?;
 
       let kitty_id = Self::_gen_random_hash(&sender)?;
-
       // ensure the kitty_id is not existed
       ensure!(!<Kitties<T>>::exists(&kitty_id), "Cat with the id existed already");
 
-      let owner_kitties_count = Self::owner_kitties_count(&sender);
-
-      let kitty = Kitty {
+      let mut kitty = Kitty {
         id: kitty_id,
         name: Some(kitty_name.clone()),
-        owner: Some(sender.clone()),
-        owner_pos: Some(owner_kitties_count),
+        owner: None,      // to be updated in _add_kitty_to_storage
+        owner_pos: None,  // to be updated in _add_kitty_to_storage
         in_auction: false,
       };
-
-      // update corresponding storage
-      <Kitties<T>>::insert(kitty_id, &kitty);
-      <KittiesArray<T>>::insert(Self::kitties_count(), &kitty_id);
-      <KittiesCount<T>>::mutate(|cnt| *cnt += 1);
-
-      // update OwnerKitties...
-      <OwnerKitties<T>>::insert((sender.clone(), owner_kitties_count), &kitty_id);
-      <OwnerKittiesCount<T>>::mutate(&sender, |cnt| *cnt += 1);
+      Self::_add_kitty_to_storage(&mut kitty, Some(&sender))?;
 
       // emit an event
       Self::deposit_event(RawEvent::KittyCreated(sender, kitty_id, kitty_name));
@@ -170,7 +159,8 @@ decl_module! {
 
       let sender = ensure_signed(origin)?;
       // Check:
-      //  1. ensure kitty exists, and the kitty.owner == sender
+      //  1. ensure kitty exists, and the kitty.owner == sender. Currently,
+      //     only the kitty owner can put his own kitty in auction
       //  2. kitty is not already `in_auction` state
       //  3. ensure end_time > current_time
       //  4. base_price > 0
@@ -193,7 +183,6 @@ decl_module! {
       // Write:
       //  1. create the auction
       let auction_id = Self::_gen_random_hash(&sender)?;
-
       // check: auction_id not existed yet
       ensure!(!<Auctions<T>>::exists(&auction_id), "Auction ID generated exists already");
 
@@ -207,17 +196,30 @@ decl_module! {
         tx: None,
       };
 
-      <Auctions<T>>::insert(auction_id, auction);
-      <AuctionsArray<T>>::insert(Self::auctions_count(), auction_id);
-      <AuctionsCount<T>>::mutate(|cnt| *cnt += 1);
+      Self::_add_auction_to_storage(&auction)?;
 
-      //  2. set the kitty state in_auction = true
+      // also set the kitty state in_auction = true
       <Kitties<T>>::mutate(kitty_id, |k| k.in_auction = true);
 
       // emit an event
-      Self::deposit_event(RawEvent::AuctionStarted(sender, kitty_id, auction_id, base_price, end_time));
+      Self::deposit_event(RawEvent::AuctionStarted(sender, kitty_id, auction_id,
+        base_price, end_time));
       Ok(())
     } // end of `fn start_auction(...)
+
+    pub fn cancel_auction(origin, auction_id: T::Hash) -> Result {
+
+      let sender = ensure_signed(origin)?;
+
+      // check:
+      //   1. only the auction_admin (which is kitty owner) can cancel the auction
+      //   2. the now time is before auction end_time
+      //   3. No one has bid in the auction yet
+
+      // write:
+      //   1. update the auction status to cancelled.
+      Ok(())
+    }
 
   } // end of `struct Module<T: Trait> for enum Call...`
 
@@ -234,5 +236,40 @@ impl<T: Trait> Module<T> {
     <Nonce<T>>::mutate(|nonce| *nonce += 1);
 
     Ok(random_hash)
+  }
+
+  // allow owner to be None
+  fn _add_kitty_to_storage(kitty: &mut Kitty<T::Hash, T::AccountId>, owner: Option<&T::AccountId>)
+    -> Result
+  {
+    let kitty_id: T::Hash = kitty.id;
+
+    // add the owner reference if `owner` is specified
+    if let Some(owner_id) = owner {
+      kitty.owner = Some(owner_id.clone());
+      kitty.owner_pos = Some(Self::owner_kitties_count(owner_id));
+    }
+
+    // update corresponding storage
+    <Kitties<T>>::insert(&kitty_id, kitty.clone());
+    <KittiesArray<T>>::insert(Self::kitties_count(), &kitty_id);
+    <KittiesCount<T>>::mutate(|cnt| *cnt += 1);
+
+    // update OwnerKitties storage...
+    if let Some(owner_id) = owner {
+      <OwnerKitties<T>>::insert((owner_id.clone(), kitty.owner_pos.unwrap()), &kitty_id);
+      <OwnerKittiesCount<T>>::mutate(owner_id, |cnt| *cnt += 1);
+    }
+    Ok(())
+  }
+
+  fn _add_auction_to_storage(auction: &Auction<T::Hash, T::Balance,
+    T::Moment, AuctionTx<T::Hash, T::AccountId, T::Balance, T::Moment>>) -> Result
+  {
+    <Auctions<T>>::insert(auction.id, auction);
+    <AuctionsArray<T>>::insert(Self::auctions_count(), auction.id);
+    <AuctionsCount<T>>::mutate(|cnt| *cnt += 1);
+
+    Ok(())
   }
 }
