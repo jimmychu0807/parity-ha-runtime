@@ -118,6 +118,7 @@ decl_storage! {
     // On auction & bid: (auction_id, index) => bid_id
     AuctionBids get(auction_bids): map (T::Hash, u64) => T::Hash;
     AuctionBidsCount get(auction_bids_count): map T::Hash => u64 = 0;
+    AuctionBidderBids get(auction_bidder_bids): map (T::Hash, T::AccountId) => T::Hash;
 
     Nonce: u64 = 0;
     // if you want to initialize value in storage, use genesis block
@@ -256,10 +257,11 @@ decl_module! {
     pub fn bid(origin, auction_id: T::Hash, bid_price: T::Balance) -> Result {
 
       let bidder = ensure_signed(origin)?;
-
       // check:
       //   1. bidder is not the kitty owner
       //   2. bid_price >= base_price
+      //   3. check the auction status is still ongoing
+      //   4. now < auction end_time
 
       // check #1
       ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
@@ -270,10 +272,50 @@ decl_module! {
       // check #2
       ensure!(bid_price >= auction.base_price, "The bid price is lower than the auction base price");
 
-      // write to a few storages:
-      //  TODO:
-      //  1. search if he has bid before. If yes, update bid. If not, create a bid
-      //  2.
+      // check #3
+      ensure!(auction.status == AuctionStatus::Ongoing, "Auction is not active");
+
+      // check #4
+      let now = <timestamp::Module<T>>::get();
+      ensure!(now < auction.end_time, "Auction has expired already");
+
+      //write #1
+      let bid = if <AuctionBidderBids<T>>::exists((auction_id, bidder.clone())) {
+        let bid = Self::bids(Self::auction_bidder_bids((auction_id, bidder.clone())));
+        // check the current bid is larger than its previous bid
+        ensure!(bid_price > bid.price, "New bid has to be larger than your previous bid");
+        <Bids<T>>::mutate(bid.id, |bid| bid.price = bid_price);
+        bid
+      } else {
+        let bid = Bid {
+          id: Self::_gen_random_hash(&bidder)?,
+          auction_id,
+          bidder: bidder.clone(),
+          price: bid_price,
+          last_update: now,
+          status: BidStatus::Active
+        };
+
+        // check the bid ID is a new unique ID
+        ensure!(!<Bids<T>>::exists(&bid.id), "Generated bid ID is duplicated");
+
+        // add into storage
+        <Bids<T>>::insert(bid.id, bid.clone());
+        <AuctionBids<T>>::insert((auction_id, Self::auction_bids_count(auction_id)),
+          bid.id);
+        <AuctionBidsCount<T>>::mutate(auction_id, |cnt| *cnt += 1);
+        <AuctionBidderBids<T>>::insert((auction_id, bidder.clone()), bid.id);
+
+        bid  // bid returned
+      };
+
+      // TODO: update auction bid info inside Auction struct if needed. algo:
+      // if bid_price > auction.bid_price_to_topmost {
+      //   enumerate current_topmost_bids.map(get bid from bid_id) {
+      //     if bid
+      //
+      //   }
+      // }
 
       Ok(())
     }
