@@ -8,12 +8,12 @@
 /// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
 
 use support::{decl_module, decl_storage, decl_event, dispatch::Result,
-  StorageValue, StorageMap, ensure, traits::Currency };
+  StorageValue, StorageMap, ensure };
 use { system::ensure_signed, timestamp };
 
 // this is needed when you want to use Vec and Box
 use rstd::prelude::*;
-use runtime_io;
+// use runtime_io;
 use runtime_primitives::traits::{ As, CheckedAdd, CheckedDiv, CheckedMul, Hash };
 use parity_codec::{ Encode, Decode };
 
@@ -24,8 +24,11 @@ pub trait Trait: timestamp::Trait + balances::Trait {
   type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
-const TOPMOST_BIDS_LEN: u32 = 3; // store the 3 topmost bids, and they cannot be withdrawn
-const AUCTION_MIN_DURATION: u64 = 5 * 60; // auction duration has to be at least 5 mins
+// store the 3 topmost bids, and they cannot be withdrawn
+const TOPMOST_BIDS_LEN: usize = 3;
+
+// auction duration has to be at least 5 mins
+// const AUCTION_MIN_DURATION: u64 = 5 * 60;
 
 // Our own Cat struct
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
@@ -136,6 +139,7 @@ decl_event!(
     KittyCreated(AccountId, Hash, Vec<u8>),
     AuctionStarted(AccountId, Hash, Hash, Balance, Moment),
     AuctionCancelled(Hash),
+    NewBid(Hash, Balance),
   }
 );
 
@@ -208,7 +212,7 @@ decl_module! {
         status: AuctionStatus::Ongoing,
 
         current_topmost_bids: Vec::new(),
-        bid_price_to_topmost: <T::Balance as As<u64>>::sa(0),
+        bid_price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
         displayed_topmost_bids: Vec::new(),
 
         tx: None,
@@ -265,7 +269,7 @@ decl_module! {
 
       // check #1
       ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
-      let auction = Self::auctions(auction_id);
+      let mut auction = Self::auctions(auction_id);
       let kitty_owner = Self::kitties(auction.kitty_id).owner.ok_or("Kitty does not have owner")?;
       ensure!(bidder != kitty_owner, "The kitty owner cannot bid in this auction");
 
@@ -309,13 +313,27 @@ decl_module! {
         bid  // bid returned
       };
 
-      // TODO: update auction bid info inside Auction struct if needed. algo:
-      // if bid_price > auction.bid_price_to_topmost {
-      //   enumerate current_topmost_bids.map(get bid from bid_id) {
-      //     if bid
-      //
-      //   }
-      // }
+      // update auction bid info inside if higher than topmost
+      if bid_price > auction.bid_price_to_topmost {
+        auction.current_topmost_bids.push(bid.id);
+
+        auction.current_topmost_bids.sort_by(|a, b| {
+          let a_bp = Self::bids(a).price;
+          let b_bp = Self::bids(b).price;
+          a_bp.partial_cmp(&b_bp).unwrap()
+        });
+        auction.current_topmost_bids = auction.current_topmost_bids
+          .into_iter().take(TOPMOST_BIDS_LEN).collect();
+
+        // only set `bid_price_to_topmost` if the whole vector is filled
+        if auction.current_topmost_bids.len() >= TOPMOST_BIDS_LEN {
+          let bid = Self::bids(auction.current_topmost_bids[TOPMOST_BIDS_LEN - 1]);
+          auction.bid_price_to_topmost = bid.price;
+        }
+      }
+
+      // emit an event
+      Self::deposit_event(RawEvent::NewBid(auction_id, bid_price));
 
       Ok(())
     }
