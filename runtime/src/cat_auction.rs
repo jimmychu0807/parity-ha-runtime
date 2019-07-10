@@ -7,15 +7,16 @@
 /// For more guidance on Substrate modules, see the example module
 /// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
 
-use support::{decl_module, decl_storage, decl_event, dispatch::Result,
-  StorageValue, StorageMap, ensure };
+use support::{ decl_module, decl_storage, decl_event, dispatch::Result,
+  StorageValue, StorageMap, ensure, traits::{ ReservableCurrency } };
 use { system::ensure_signed, timestamp };
 
 // this is needed when you want to use Vec and Box
 use rstd::prelude::*;
-// use runtime_io;
-use runtime_primitives::traits::{ As, CheckedAdd, CheckedDiv, CheckedMul, Hash };
+use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
+// use core::convert::{ TryInto, TryFrom };
+// use runtime_io;
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
 
@@ -26,9 +27,33 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 
 // store the 3 topmost bids, and they cannot be withdrawn
 const TOPMOST_BIDS_LEN: usize = 3;
-
 // auction duration has to be at least 5 mins
-// const AUCTION_MIN_DURATION: u64 = 5 * 60;
+const AUCTION_MIN_DURATION: u64 = 10 * 60;
+const DISPLAYED_BIDS_UPDATE_PERIOD: u64 = 10 * 60;
+
+#[derive(Encode, Decode, Clone, PartialEq, Debug)]
+pub enum AuctionStatus {
+  Ongoing,
+  Cancelled,
+  ToBeClaimed,
+  Closed
+}
+// necessary so structs depending on this enum can be en-/de-code with
+//   default value.
+impl Default for AuctionStatus {
+  fn default() -> Self { AuctionStatus::Ongoing }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Debug)]
+pub enum BidStatus {
+  Active,
+  Withdrawn,
+}
+// necessary so structs depending on this enum can be en-/de-code with
+//   default value.
+impl Default for BidStatus {
+  fn default() -> Self { BidStatus::Active }
+}
 
 // Our own Cat struct
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
@@ -38,19 +63,6 @@ pub struct Kitty<Hash, AccountId> {
   owner: Option<AccountId>,
   owner_pos: Option<u64>,
   in_auction: bool,
-}
-
-#[derive(Encode, Decode, Clone, PartialEq, Debug)]
-pub enum AuctionStatus {
-  Ongoing,
-  Cancelled,
-  ToBeClaimed,
-  Closed
-}
-
-// This is necessary so that other structs depend on this enum can be encode/decode with default value.
-impl Default for AuctionStatus {
-  fn default() -> Self { AuctionStatus::Ongoing }
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
@@ -64,20 +76,10 @@ pub struct Auction<Hash, Balance, Moment, AuctionTx> {
 
   current_topmost_bids: Vec<Hash>,
   bid_price_to_topmost: Balance,
-  displayed_topmost_bids: Vec<Hash>,
+  displayed_bids: Vec<Hash>,
+  displayed_bids_last_update: Moment,
 
   tx: Option<AuctionTx>,
-}
-
-#[derive(Encode, Decode, Clone, PartialEq, Debug)]
-pub enum BidStatus {
-  Active,
-  Withdrawn,
-}
-
-// This is necessary so that other structs depend on this enum can be encode/decode with default value.
-impl Default for BidStatus {
-  fn default() -> Self { BidStatus::Active }
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
@@ -188,10 +190,8 @@ decl_module! {
 
       // check #3
       let now = <timestamp::Module<T>>::get();
-
-      // TODO: ideally would be `end_time > now + AUCTION_MIN_DURATION`,
-      //   but not sure how to do moment arithmetic.
-      ensure!(end_time > now, "End time cannot be set less than 5 mins from current time");
+      ensure!(end_time.as_() > AUCTION_MIN_DURATION + now.as_(),
+        "End time cannot be set less than 5 mins from current time");
 
       // check #4
       ensure!(base_price > <T::Balance as As<u64>>::sa(0),
@@ -207,13 +207,14 @@ decl_module! {
         id: auction_id.clone(),
         kitty_id,
         base_price,
-        start_time: now,
+        start_time: now.clone(),
         end_time: end_time.clone(),
         status: AuctionStatus::Ongoing,
 
         current_topmost_bids: Vec::new(),
         bid_price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
-        displayed_topmost_bids: Vec::new(),
+        displayed_bids: Vec::new(),
+        displayed_bids_last_update: now,
 
         tx: None,
       };
@@ -248,7 +249,8 @@ decl_module! {
       ensure!(auction.end_time > now, "The auction has passed its end time");
 
       // check #3:
-      ensure!(Self::auction_bids_count(auction_id) == 0, "Someone has bid already. So this auction cannot be cancelled");
+      ensure!(Self::auction_bids_count(auction_id) == 0,
+        "Someone has bidded already. So this auction cannot be cancelled");
 
       // write:
       //   1. update the auction status to cancelled.
@@ -284,10 +286,13 @@ decl_module! {
       ensure!(now < auction.end_time, "Auction has expired already");
 
       //write #1
+      let to_reserve: T::Balance;
       let bid = if <AuctionBidderBids<T>>::exists((auction_id, bidder.clone())) {
         let bid = Self::bids(Self::auction_bidder_bids((auction_id, bidder.clone())));
         // check the current bid is larger than its previous bid
         ensure!(bid_price > bid.price, "New bid has to be larger than your previous bid");
+
+        to_reserve = bid_price - bid.price;
         <Bids<T>>::mutate(bid.id, |bid| bid.price = bid_price);
         bid
       } else {
@@ -309,9 +314,13 @@ decl_module! {
           bid.id);
         <AuctionBidsCount<T>>::mutate(auction_id, |cnt| *cnt += 1);
         <AuctionBidderBids<T>>::insert((auction_id, bidder.clone()), bid.id);
+        to_reserve = bid_price;
 
         bid  // bid returned
       };
+
+      // bidder money has to be locked here
+      <balances::Module<T>>::reserve(&bidder, to_reserve)?;
 
       // update auction bid info inside if higher than topmost
       if bid_price > auction.bid_price_to_topmost {
@@ -334,6 +343,33 @@ decl_module! {
 
       // emit an event
       Self::deposit_event(RawEvent::NewBid(auction_id, bid_price));
+
+      Ok(())
+    }
+
+    pub fn update_display_bids(origin) -> Result {
+      // no need to verify caller
+
+      // 1. loop through all auction that is still Ongoing,
+      // 2. if now > displayed_bids_last_update + DISPLAYED_BIDS_UPDATE_PERIOD,
+      //      copy current_topmost_bids to displayed_bids
+
+      // Q: is there difference between getting the auction obj vs updating it via mutate?
+      [ 0..Self::auctions_count() ].iter()
+        .map(|i| Self::auctionsArray[i])
+        .filter(|aid| {
+          let auction = Self::auctions(aid);
+          let now = <timestamp::Module<T>>::get();
+          let to_update = DISPLAYED_BIDS_UPDATE_PERIOD + auction.displayed_bids_last_update.as_();
+
+          auction.status == AuctionStatus::Ongoing && to_update <= now.as_()
+        })
+        .map(|aid| {
+          <Auctions<T>>::mutate(aid, |auction| {
+            auction.displayed_bids = auction.current_topmost_bids.clone();
+            auction.displayed_bids_last_update = <timestamp::Module<T>>::get();
+          });
+        });
 
       Ok(())
     }
