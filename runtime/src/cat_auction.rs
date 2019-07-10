@@ -190,7 +190,7 @@ decl_module! {
 
       // check #3
       let now = <timestamp::Module<T>>::get();
-      ensure!(end_time.as_() > AUCTION_MIN_DURATION + now.as_(),
+      ensure!(end_time.clone().as_() > AUCTION_MIN_DURATION + now.clone().as_(),
         "End time cannot be set less than 5 mins from current time");
 
       // check #4
@@ -347,7 +347,7 @@ decl_module! {
       Ok(())
     }
 
-    pub fn update_display_bids(origin) -> Result {
+    pub fn update_display_bids(_origin) -> Result {
       // no need to verify caller
 
       // 1. loop through all auction that is still Ongoing,
@@ -355,19 +355,20 @@ decl_module! {
       //      copy current_topmost_bids to displayed_bids
 
       // Q: is there difference between getting the auction obj vs updating it via mutate?
-      [ 0..Self::auctions_count() ].iter()
-        .map(|i| Self::auctionsArray[i])
+      let now = <timestamp::Module<T>>::get();
+
+      (0..Self::auctions_count())
+        .map(|i| Self::auction_array(i))
         .filter(|aid| {
           let auction = Self::auctions(aid);
-          let now = <timestamp::Module<T>>::get();
-          let to_update = DISPLAYED_BIDS_UPDATE_PERIOD + auction.displayed_bids_last_update.as_();
-
-          auction.status == AuctionStatus::Ongoing && to_update <= now.as_()
+          let to_update = DISPLAYED_BIDS_UPDATE_PERIOD
+            + auction.displayed_bids_last_update.as_();
+          auction.status == AuctionStatus::Ongoing && to_update <= now.clone().as_()
         })
-        .map(|aid| {
+        .for_each(|aid| {
           <Auctions<T>>::mutate(aid, |auction| {
             auction.displayed_bids = auction.current_topmost_bids.clone();
-            auction.displayed_bids_last_update = <timestamp::Module<T>>::get();
+            auction.displayed_bids_last_update = now.clone();
           });
         });
 
