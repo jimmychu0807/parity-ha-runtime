@@ -8,7 +8,7 @@
 /// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
 
 use support::{ decl_module, decl_storage, decl_event, dispatch::Result,
-  StorageValue, StorageMap, ensure, traits::{ ReservableCurrency } };
+  StorageValue, StorageMap, ensure, traits::{ Currency, ReservableCurrency } };
 use { system::ensure_signed, timestamp };
 
 // this is needed when you want to use Vec and Box
@@ -29,7 +29,7 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 const TOPMOST_BIDS_LEN: usize = 3;
 // auction duration has to be at least 5 mins
 const AUCTION_MIN_DURATION: u64 = 10 * 60;
-const DISPLAYED_BIDS_UPDATE_PERIOD: u64 = 10 * 60;
+const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 10 * 60;
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug)]
 pub enum AuctionStatus {
@@ -76,8 +76,8 @@ pub struct Auction<Hash, Balance, Moment, AuctionTx> {
 
   current_topmost_bids: Vec<Hash>,
   bid_price_to_topmost: Balance,
-  displayed_bids: Vec<Hash>,
-  displayed_bids_last_update: Moment,
+  display_bids: Vec<Hash>,
+  display_bids_last_update: Moment,
 
   tx: Option<AuctionTx>,
 }
@@ -141,7 +141,10 @@ decl_event!(
     KittyCreated(AccountId, Hash, Vec<u8>),
     AuctionStarted(AccountId, Hash, Hash, Balance, Moment),
     AuctionCancelled(Hash),
+    AuctionClosed(Hash),
     NewBid(Hash, Balance),
+    UpdateDisplayedBids(Hash, Vec<Hash>),
+    AuctionTx(Hash, Hash, AccountId, AccountId),
   }
 );
 
@@ -213,8 +216,8 @@ decl_module! {
 
         current_topmost_bids: Vec::new(),
         bid_price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
-        displayed_bids: Vec::new(),
-        displayed_bids_last_update: now,
+        display_bids: Vec::new(),
+        display_bids_last_update: now,
 
         tx: None,
       };
@@ -347,36 +350,35 @@ decl_module! {
       Ok(())
     }
 
-    pub fn update_display_bids(_origin) -> Result {
+    pub fn update_auction_display_bids(_origin, auction_id: T::Hash) -> Result {
       // no need to verify caller
 
       // 1. loop through all auction that is still Ongoing,
-      // 2. if now > displayed_bids_last_update + DISPLAYED_BIDS_UPDATE_PERIOD,
-      //      copy current_topmost_bids to displayed_bids
+      // 2. if now > display_bids_last_update + DISPLAY_BIDS_UPDATE_PERIOD,
+      //      copy current_topmost_bids to display_bids
 
-      // Q: is there difference between getting the auction obj vs updating it via mutate?
-      let now = <timestamp::Module<T>>::get();
+      // Avoid looping thru all auctions for display bids update
+      // (0..Self::auctions_count())
+      //   .map(|i| Self::auction_array(i))
+      //   .for_each(|aid| {
+      //     let _ = Self::_update_auction_display_bids(aid);
+      //   });
+      Self::_update_auction_display_bids(auction_id)
+    }
 
-      (0..Self::auctions_count())
-        .map(|i| Self::auction_array(i))
-        .filter(|aid| {
-          let auction = Self::auctions(aid);
-          let to_update = DISPLAYED_BIDS_UPDATE_PERIOD
-            + auction.displayed_bids_last_update.as_();
-          auction.status == AuctionStatus::Ongoing && to_update <= now.clone().as_()
-        })
-        .for_each(|aid| {
-          <Auctions<T>>::mutate(aid, |auction| {
-            auction.displayed_bids = auction.current_topmost_bids.clone();
-            auction.displayed_bids_last_update = now.clone();
-          });
-        });
+    pub fn close_auction_and_tx(_origin, auction_id: T::Hash) -> Result {
+      // check:
+      //   1. ensure it is AuctionStatus::Ongoing
+      // (0..Self::auctions_count())
+      //   .map(|i| Self::auction_array(i))
+      //   .for_each(|aid| {
+      //     let _ = Self::_close_auction_and_tx(aid);
+      //   });
 
-      Ok(())
+      Self::_close_auction_and_tx(auction_id)
     }
 
   } // end of `struct Module<T: Trait> for enum Call...`
-
 } // end of `decl_module!`
 
 impl<T: Trait> Module<T> {
@@ -434,5 +436,111 @@ impl<T: Trait> Module<T> {
     let auction = Self::auctions(auction_id);
     let kitty = Self::kitties(auction.kitty_id);
     kitty.owner.unwrap()
+  }
+
+  fn _update_auction_display_bids(auction_id: T::Hash) -> Result {
+    ensure!(<Auctions<T>>::exists(auction_id), "The auction does not exist");
+    let now = <timestamp::Module<T>>::get();
+    let auction = Self::auctions(auction_id);
+    let to_update = DISPLAY_BIDS_UPDATE_PERIOD + auction.display_bids_last_update.as_();
+
+    if !(auction.status == AuctionStatus::Ongoing && to_update <= now.clone().as_()) { return Ok(()) };
+
+    // Q: is there any difference between updating the auction ref vs updating it via mutate?
+    <Auctions<T>>::mutate(auction_id, |auction| {
+      auction.display_bids = auction.current_topmost_bids.clone();
+      auction.display_bids_last_update = now.clone();
+    });
+    // emit event if auction display bids updated
+    Self::deposit_event(RawEvent::UpdateDisplayedBids(auction_id, auction.display_bids));
+
+    Ok(())
+  }
+
+  fn _close_auction_and_tx(auction_id: T::Hash) -> Result {
+    ensure!(<Auctions<T>>::exists(auction_id), "The auction does not exist");
+    let now = <timestamp::Module<T>>::get();
+    let auction = Self::auctions(auction_id);
+
+    if !(auction.status == AuctionStatus::Ongoing && now >= auction.end_time) { return Ok(()) };
+
+    // write
+    //   1. check if there is a highest bidder, if yes
+    //        L 1) unreserve his money, 2) transfer his money to kitty_owner, 3) update kitty to the bidder
+    //        L emit an event saying an auction with aid has a transaction, of kitty_id from AccountId to AccountId
+    //   2. unreserve all fund from the rest of the bidders
+    //   3. set auction status to Closed
+    //        L emit an event saying auction closed
+
+    // #1. Transact the kitty and money between winner and kitty owner
+    let mut winner_opt: Option<T::AccountId> = None;
+    if auction.current_topmost_bids.len() > 0 {
+      let reward_bid = Self::bids(auction.current_topmost_bids[0]);
+      winner_opt = Some(reward_bid.bidder.clone());
+      let kitty_owner = Self::kitties(auction.kitty_id).owner.unwrap();
+
+      // 1) unreserve winner money,
+      // 2) transfer winner money to kitty_owner,
+      // 3) transfer kitty ownership to the winner
+      if let Some(ref winner_ref) = winner_opt {
+        <balances::Module<T>>::unreserve(winner_ref, reward_bid.price);
+        let _transfer = <balances::Module<T> as Currency<_>>::transfer(winner_ref, &kitty_owner, reward_bid.price);
+        match _transfer {
+          Err(_e) => Err("Fund transfer error"),
+          Ok(_v) => {
+            Self::_transfer_kitty_ownership(&auction.kitty_id, winner_ref);
+            // emit event of the kitty is transferred
+            Self::deposit_event(RawEvent::AuctionTx(auction_id, auction.kitty_id, kitty_owner, winner_opt.clone().unwrap()));
+            Ok(())
+          },
+        }?;
+      }
+    }
+
+    // #2. unreserve all fund from the rest of the bidders
+    let bids_count = <AuctionBidsCount<T>>::get(auction_id);
+    (0..bids_count)
+      .map(|i| Self::bids( Self::auction_bids((auction_id, i)) ) )
+      .filter(|bid| match &winner_opt {
+        Some(winner) => *winner != bid.bidder,
+        None => true
+      })
+      .for_each(|bid| {
+        <balances::Module<T>>::unreserve(&bid.bidder, bid.price);
+      });
+
+    // #3. close the auction and emit event
+    <Auctions<T>>::mutate(auction_id, |auction| auction.status = AuctionStatus::Closed);
+    Self::deposit_event(RawEvent::AuctionClosed(auction_id));
+
+    Ok(())
+  }
+
+  fn _transfer_kitty_ownership(kitty_id: &T::Hash, new_owner_ref: &T::AccountId) {
+    // Need to update:
+    //   1. update OwnerKitties, OwnerKittiesCount of original owner
+    //   2. update OwnerKitties, OwnerKittiesCount of new_owner
+    //   3. update Kitty (owner, owner_pos)
+    let kitty = Self::kitties(kitty_id);
+
+    // 1. update OwnerKitties, OwnerKittiesCount of original owner
+    let orig_kitty_owner = kitty.owner.clone().unwrap();
+    let kitty_cnt = Self::owner_kitties_count(&orig_kitty_owner);
+    let last_kitty_id = Self::owner_kitties((orig_kitty_owner.clone(), kitty_cnt - 1));
+    <Kitties<T>>::mutate(last_kitty_id, |last_kitty| last_kitty.owner_pos = kitty.owner_pos.clone());
+    <OwnerKitties<T>>::insert( (orig_kitty_owner.clone(), kitty.owner_pos.unwrap()),
+      <OwnerKitties<T>>::take((orig_kitty_owner.clone(), kitty_cnt - 1)) );
+    <OwnerKittiesCount<T>>::mutate(&orig_kitty_owner, |cnt| *cnt -= 1);
+
+    // 2. update OwnerKitties, OwnerKittiesCount of new_owner
+    let kitty_new_pos = Self::owner_kitties_count(new_owner_ref);
+    <OwnerKitties<T>>::insert((new_owner_ref.clone(), kitty_new_pos), kitty_id);
+    <OwnerKittiesCount<T>>::mutate(new_owner_ref, |cnt| *cnt += 1);
+
+    // 3. update the kitty
+    <Kitties<T>>::mutate(kitty_id, |kitty| {
+      kitty.owner = Some(new_owner_ref.clone());
+      kitty.owner_pos = Some(kitty_new_pos);
+    });
   }
 }
