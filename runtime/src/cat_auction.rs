@@ -35,7 +35,6 @@ const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 10 * 60;
 pub enum AuctionStatus {
   Ongoing,
   Cancelled,
-  ToBeClaimed,
   Closed
 }
 // necessary so structs depending on this enum can be en-/de-code with
@@ -93,10 +92,9 @@ pub struct Bid<Hash, AccountId, Balance, Moment> {
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq, Debug)]
-pub struct AuctionTx<Hash, AccountId, Balance, Moment> {
-  auction_id: Hash,
+pub struct AuctionTx<Moment, AccountId, Balance> {
   tx_time: Moment,
-  buyer: AccountId,
+  winner: AccountId,
   tx_price: Balance,
 }
 
@@ -113,7 +111,7 @@ decl_storage! {
 
     // On Auction
     Auctions get(auctions): map T::Hash => Auction<T::Hash, T::Balance, T::Moment,
-      AuctionTx<T::Hash, T::AccountId, T::Balance, T::Moment>>;
+      AuctionTx<T::Moment, T::AccountId, T::Balance>>;
     AuctionsArray get(auction_array): map u64 => T::Hash;
     AuctionsCount get(auctions_count): u64 = 0;
 
@@ -420,7 +418,7 @@ impl<T: Trait> Module<T> {
   }
 
   fn _add_auction_to_storage(auction: &Auction<T::Hash, T::Balance,
-    T::Moment, AuctionTx<T::Hash, T::AccountId, T::Balance, T::Moment>>) -> Result
+    T::Moment, AuctionTx<T::Moment, T::AccountId, T::Balance>>) -> Result
   {
     <Auctions<T>>::insert(auction.id, auction);
     <AuctionsArray<T>>::insert(Self::auctions_count(), auction.id);
@@ -474,6 +472,7 @@ impl<T: Trait> Module<T> {
 
     // #1. Transact the kitty and money between winner and kitty owner
     let mut winner_opt: Option<T::AccountId> = None;
+    let mut auction_tx_opt: Option<AuctionTx<T::Moment, T::AccountId, T::Balance>> = None;
     if auction.current_topmost_bids.len() > 0 {
       let reward_bid = Self::bids(auction.current_topmost_bids[0]);
       winner_opt = Some(reward_bid.bidder.clone());
@@ -489,6 +488,14 @@ impl<T: Trait> Module<T> {
           Err(_e) => Err("Fund transfer error"),
           Ok(_v) => {
             Self::_transfer_kitty_ownership(&auction.kitty_id, winner_ref);
+
+            // create the auction_tx here
+            auction_tx_opt = Some(AuctionTx {
+              tx_time: now,
+              winner: winner_ref.clone(),
+              tx_price: reward_bid.price
+            });
+
             // emit event of the kitty is transferred
             Self::deposit_event(RawEvent::AuctionTx(auction_id, auction.kitty_id, kitty_owner, winner_opt.clone().unwrap()));
             Ok(())
@@ -510,7 +517,10 @@ impl<T: Trait> Module<T> {
       });
 
     // #3. close the auction and emit event
-    <Auctions<T>>::mutate(auction_id, |auction| auction.status = AuctionStatus::Closed);
+    <Auctions<T>>::mutate(auction_id, |auction| {
+      auction.status = AuctionStatus::Closed;
+      auction.tx = auction_tx_opt;
+    });
     Self::deposit_event(RawEvent::AuctionClosed(auction_id));
 
     Ok(())

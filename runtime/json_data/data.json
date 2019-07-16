@@ -1,15 +1,9 @@
 {
   "AuctionStatus": {
-    "_enum": [ "Ongoing", "Cancelled", "ToBeClaimed", "Closed" ]
+    "_enum": [ "Ongoing", "Cancelled", "Closed" ]
   },
   "BidStatus": {
     "_enum": [ "Active", "Withdrawn" ]
-  },
-  "AuctionTx": {
-    "auction_id": "Hash",
-    "tx_time": "Moment",
-    "buyer": "AccountId",
-    "tx_price": "Balance"
   },
   "Kitty": {
     "id": "Hash",
@@ -17,6 +11,11 @@
     "owner": "Option<AccountId>",
     "owner_pos": "Option<u64>",
     "in_auction": "bool"
+  },
+  "AuctionTx": {
+    "tx_time": "Moment",
+    "winner": "AccountId",
+    "tx_price": "Balance"
   },
   "Auction": {
     "id": "Hash",
@@ -28,7 +27,8 @@
 
     "current_topmost_bids": "Vec<Hash>",
     "bid_price_to_topmost": "Balance",
-    "displayed_topmost_bids": "Vec<Hash>",
+    "display_bids": "Vec<Hash>",
+    "display_bids_last_update": "Moment",
 
     "tx": "Option<AuctionTx>"
   },
