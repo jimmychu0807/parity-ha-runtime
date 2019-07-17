@@ -570,8 +570,8 @@ impl<T: Trait> Module<T> {
     // 1. update OwnerKitties, OwnerKittiesCount of original owner
     let orig_kitty_owner = kitty.owner.clone().unwrap();
     let kitty_cnt = Self::owner_kitties_count(&orig_kitty_owner);
-    // Two cases: when orig_kitty_owner has only 1 kitty, or multiple kitties
-    if kitty_cnt == 1 {
+    // Two cases: when the kitty is at the last position in OwnerKitties storage, or not
+    if kitty.owner_pos.unwrap() == kitty_cnt - 1 {
       <OwnerKitties<T>>::remove((orig_kitty_owner.clone(), kitty_cnt - 1));
     } else {
       let last_kitty_id = Self::owner_kitties((orig_kitty_owner.clone(), kitty_cnt - 1));
