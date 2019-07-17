@@ -16,7 +16,7 @@ use rstd::prelude::*;
 use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
 // use core::convert::{ TryInto, TryFrom };
-// use runtime_io;
+use runtime_io;
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
 
@@ -28,7 +28,7 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 // store the 3 topmost bids, and they cannot be withdrawn
 const TOPMOST_BIDS_LEN: usize = 3;
 // auction duration has to be at least 10 mins
-const AUCTION_MIN_DURATION: u64 = 10 * 60;
+const AUCTION_MIN_DURATION: u64 = 3 * 60;
 // TODO: modify the following to at least 5 mins when run in production
 const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 1 * 60;
 
@@ -489,9 +489,8 @@ impl<T: Trait> Module<T> {
     let now = <timestamp::Module<T>>::get();
     let auction = Self::auctions(auction_id);
 
-    if !(auction.status == AuctionStatus::Ongoing && now >= auction.end_time) {
-      return Ok(());
-    }
+    ensure!(auction.status == AuctionStatus::Ongoing, "The auction is no longer running.");
+    ensure!(now >= auction.end_time, "The auction is not expired yet.");
 
     // write
     //   1. check if there is a highest bidder, if yes
@@ -533,6 +532,11 @@ impl<T: Trait> Module<T> {
           },
         }?;
       }
+    } else {
+      // No kitty ownership transfer is made. Resume the kitty to the owner
+      <Kitties<T>>::mutate(Self::auctions(auction_id).kitty_id, |kitty| {
+        kitty.in_auction = false;
+      });
     }
 
     // #2. unreserve all fund from the rest of the bidders
@@ -567,10 +571,26 @@ impl<T: Trait> Module<T> {
     // 1. update OwnerKitties, OwnerKittiesCount of original owner
     let orig_kitty_owner = kitty.owner.clone().unwrap();
     let kitty_cnt = Self::owner_kitties_count(&orig_kitty_owner);
-    let last_kitty_id = Self::owner_kitties((orig_kitty_owner.clone(), kitty_cnt - 1));
-    <Kitties<T>>::mutate(last_kitty_id, |last_kitty| last_kitty.owner_pos = kitty.owner_pos.clone());
-    <OwnerKitties<T>>::insert( (orig_kitty_owner.clone(), kitty.owner_pos.unwrap()),
-      <OwnerKitties<T>>::take((orig_kitty_owner.clone(), kitty_cnt - 1)) );
+    // Two cases: when orig_kitty_owner has only 1 kitty, or multiple kitties
+    if kitty_cnt == 1 {
+
+
+      runtime_io::print("single kitty cnt");
+
+
+      <OwnerKitties<T>>::remove((orig_kitty_owner.clone(), kitty_cnt - 1));
+    } else {
+
+
+      runtime_io::print("multiple kitty cnt");
+      runtime_io::print(kitty_cnt);
+
+
+      let last_kitty_id = Self::owner_kitties((orig_kitty_owner.clone(), kitty_cnt - 1));
+      <Kitties<T>>::mutate(last_kitty_id, |last_kitty| last_kitty.owner_pos = kitty.owner_pos.clone());
+      <OwnerKitties<T>>::insert((orig_kitty_owner.clone(), kitty.owner_pos.unwrap()),
+        <OwnerKitties<T>>::take((orig_kitty_owner.clone(), kitty_cnt - 1)) );
+    }
     <OwnerKittiesCount<T>>::mutate(&orig_kitty_owner, |cnt| *cnt -= 1);
 
     // 2. update OwnerKitties, OwnerKittiesCount of new_owner
@@ -582,6 +602,7 @@ impl<T: Trait> Module<T> {
     <Kitties<T>>::mutate(kitty_id, |kitty| {
       kitty.owner = Some(new_owner_ref.clone());
       kitty.owner_pos = Some(kitty_new_pos);
+      kitty.in_auction = false;
     });
   }
 }
