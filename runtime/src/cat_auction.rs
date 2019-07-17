@@ -16,7 +16,7 @@ use rstd::prelude::*;
 use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
 // use core::convert::{ TryInto, TryFrom };
-use runtime_io;
+// use runtime_io;
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
 
@@ -365,7 +365,6 @@ decl_module! {
       //   .for_each(|aid| {
       //     let _ = Self::_close_auction_and_tx(aid);
       //   });
-
       Self::_close_auction_and_tx(auction_id)
     }
 
@@ -573,19 +572,8 @@ impl<T: Trait> Module<T> {
     let kitty_cnt = Self::owner_kitties_count(&orig_kitty_owner);
     // Two cases: when orig_kitty_owner has only 1 kitty, or multiple kitties
     if kitty_cnt == 1 {
-
-
-      runtime_io::print("single kitty cnt");
-
-
       <OwnerKitties<T>>::remove((orig_kitty_owner.clone(), kitty_cnt - 1));
     } else {
-
-
-      runtime_io::print("multiple kitty cnt");
-      runtime_io::print(kitty_cnt);
-
-
       let last_kitty_id = Self::owner_kitties((orig_kitty_owner.clone(), kitty_cnt - 1));
       <Kitties<T>>::mutate(last_kitty_id, |last_kitty| last_kitty.owner_pos = kitty.owner_pos.clone());
       <OwnerKitties<T>>::insert((orig_kitty_owner.clone(), kitty.owner_pos.unwrap()),
