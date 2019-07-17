@@ -27,9 +27,10 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 
 // store the 3 topmost bids, and they cannot be withdrawn
 const TOPMOST_BIDS_LEN: usize = 3;
-// auction duration has to be at least 5 mins
+// auction duration has to be at least 10 mins
 const AUCTION_MIN_DURATION: u64 = 10 * 60;
-const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 10 * 60;
+// TODO: modify the following to at least 5 mins when run in production
+const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 1 * 60;
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug)]
 pub enum AuctionStatus {
@@ -73,8 +74,8 @@ pub struct Auction<Hash, Balance, Moment, AuctionTx> {
   end_time: Moment,
   status: AuctionStatus,
 
-  current_topmost_bids: Vec<Hash>,
-  bid_price_to_topmost: Balance,
+  topmost_bids: Vec<Hash>,
+  price_to_topmost: Balance,
   display_bids: Vec<Hash>,
   display_bids_last_update: Moment,
 
@@ -212,8 +213,8 @@ decl_module! {
         end_time: end_time.clone(),
         status: AuctionStatus::Ongoing,
 
-        current_topmost_bids: Vec::new(),
-        bid_price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
+        topmost_bids: Vec::new(),
+        price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
         display_bids: Vec::new(),
         display_bids_last_update: now,
 
@@ -245,6 +246,7 @@ decl_module! {
       ensure!(Self::_auction_admin(auction_id) == sender, "You are not the auction admin");
 
       let auction = Self::auctions(auction_id);
+      let kitty_id = auction.kitty_id;
       let now = <timestamp::Module<T>>::get();
       // check #2:
       ensure!(auction.end_time > now, "The auction has passed its end time");
@@ -255,7 +257,9 @@ decl_module! {
 
       // write:
       //   1. update the auction status to cancelled.
+      //   2. update the cat status
       <Auctions<T>>::mutate(auction_id, |auction| auction.status = AuctionStatus::Cancelled);
+      <Kitties<T>>::mutate(kitty_id, |kitty| kitty.in_auction = false);
 
       Self::deposit_event(RawEvent::AuctionCancelled(auction_id));
       Ok(())
@@ -272,7 +276,7 @@ decl_module! {
 
       // check #1
       ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
-      let mut auction = Self::auctions(auction_id);
+      let auction = Self::auctions(auction_id);
       let kitty_owner = Self::kitties(auction.kitty_id).owner.ok_or("Kitty does not have owner")?;
       ensure!(bidder != kitty_owner, "The kitty owner cannot bid in this auction");
 
@@ -294,7 +298,10 @@ decl_module! {
         ensure!(bid_price > bid.price, "New bid has to be larger than your previous bid");
 
         to_reserve = bid_price - bid.price;
-        <Bids<T>>::mutate(bid.id, |bid| bid.price = bid_price);
+        <Bids<T>>::mutate(bid.id, |bid| {
+          bid.price = bid_price;
+          bid.last_update = now;
+        });
         bid
       } else {
         let bid = Bid {
@@ -324,22 +331,8 @@ decl_module! {
       <balances::Module<T>>::reserve(&bidder, to_reserve)?;
 
       // update auction bid info inside if higher than topmost
-      if bid_price > auction.bid_price_to_topmost {
-        auction.current_topmost_bids.push(bid.id);
-
-        auction.current_topmost_bids.sort_by(|a, b| {
-          let a_bp = Self::bids(a).price;
-          let b_bp = Self::bids(b).price;
-          a_bp.partial_cmp(&b_bp).unwrap()
-        });
-        auction.current_topmost_bids = auction.current_topmost_bids
-          .into_iter().take(TOPMOST_BIDS_LEN).collect();
-
-        // only set `bid_price_to_topmost` if the whole vector is filled
-        if auction.current_topmost_bids.len() >= TOPMOST_BIDS_LEN {
-          let bid = Self::bids(auction.current_topmost_bids[TOPMOST_BIDS_LEN - 1]);
-          auction.bid_price_to_topmost = bid.price;
-        }
+      if bid_price > auction.price_to_topmost {
+        let _ = Self::_update_auction_topmost_bids(&auction_id, &bid.id);
       }
 
       // emit an event
@@ -353,7 +346,7 @@ decl_module! {
 
       // 1. loop through all auction that is still Ongoing,
       // 2. if now > display_bids_last_update + DISPLAY_BIDS_UPDATE_PERIOD,
-      //      copy current_topmost_bids to display_bids
+      //      copy topmost_bids to display_bids
 
       // Avoid looping thru all auctions for display bids update
       // (0..Self::auctions_count())
@@ -436,17 +429,53 @@ impl<T: Trait> Module<T> {
     kitty.owner.unwrap()
   }
 
+  fn _update_auction_topmost_bids(auction_id: &T::Hash, bid_id: &T::Hash) -> Result {
+    let auction = Self::auctions(auction_id);
+    let bid = Self::bids(bid_id);
+
+    if bid.price <= auction.price_to_topmost {
+      return Ok(());
+    }
+
+    <Auctions<T>>::mutate(auction_id, |auction| {
+      // it could be this bid is a topmost bid already with bid_price being updated
+      if !auction.topmost_bids.contains(bid_id) {
+        auction.topmost_bids.push(bid_id.clone());
+      }
+
+      // sort the bids
+      auction.topmost_bids.sort_by(|a, b| {
+        let a_bp = Self::bids(a).price;
+        let b_bp = Self::bids(b).price;
+        a_bp.partial_cmp(&b_bp).unwrap()
+      });
+
+      // drop the last bid if needed
+      auction.topmost_bids = auction.topmost_bids.clone()
+        .into_iter().take(TOPMOST_BIDS_LEN).collect();
+
+      // update the price_to_topmost. Only update when the vector is filled
+      if auction.topmost_bids.len() >= TOPMOST_BIDS_LEN {
+        let bid = Self::bids(auction.topmost_bids[TOPMOST_BIDS_LEN - 1]);
+        auction.price_to_topmost = bid.price;
+      }
+    });
+
+    Ok(())
+  }
+
   fn _update_auction_display_bids(auction_id: T::Hash) -> Result {
     ensure!(<Auctions<T>>::exists(auction_id), "The auction does not exist");
     let now = <timestamp::Module<T>>::get();
     let auction = Self::auctions(auction_id);
     let to_update = DISPLAY_BIDS_UPDATE_PERIOD + auction.display_bids_last_update.as_();
 
-    if !(auction.status == AuctionStatus::Ongoing && to_update <= now.clone().as_()) { return Ok(()) };
+    ensure!(auction.status == AuctionStatus::Ongoing, "The auction is no longer running.");
+    ensure!(to_update <= now.clone().as_(), "The auction display bids has just been recently updated.");
 
     // Q: is there any difference between updating the auction ref vs updating it via mutate?
     <Auctions<T>>::mutate(auction_id, |auction| {
-      auction.display_bids = auction.current_topmost_bids.clone();
+      auction.display_bids = auction.topmost_bids.clone();
       auction.display_bids_last_update = now.clone();
     });
     // emit event if auction display bids updated
@@ -460,7 +489,9 @@ impl<T: Trait> Module<T> {
     let now = <timestamp::Module<T>>::get();
     let auction = Self::auctions(auction_id);
 
-    if !(auction.status == AuctionStatus::Ongoing && now >= auction.end_time) { return Ok(()) };
+    if !(auction.status == AuctionStatus::Ongoing && now >= auction.end_time) {
+      return Ok(());
+    }
 
     // write
     //   1. check if there is a highest bidder, if yes
@@ -473,8 +504,8 @@ impl<T: Trait> Module<T> {
     // #1. Transact the kitty and money between winner and kitty owner
     let mut winner_opt: Option<T::AccountId> = None;
     let mut auction_tx_opt: Option<AuctionTx<T::Moment, T::AccountId, T::Balance>> = None;
-    if auction.current_topmost_bids.len() > 0 {
-      let reward_bid = Self::bids(auction.current_topmost_bids[0]);
+    if auction.topmost_bids.len() > 0 {
+      let reward_bid = Self::bids(auction.topmost_bids[0]);
       winner_opt = Some(reward_bid.bidder.clone());
       let kitty_owner = Self::kitties(auction.kitty_id).owner.unwrap();
 

@@ -25,8 +25,8 @@
     "end_time": "Moment",
     "status": "AuctionStatus",
 
-    "current_topmost_bids": "Vec<Hash>",
-    "bid_price_to_topmost": "Balance",
+    "topmost_bids": "Vec<Hash>",
+    "price_to_topmost": "Balance",
     "display_bids": "Vec<Hash>",
     "display_bids_last_update": "Moment",
 
