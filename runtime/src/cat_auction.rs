@@ -1,12 +1,3 @@
-/// A runtime module template with necessary imports
-
-/// Feel free to remove or edit this file as needed.
-/// If you change the name of this file, make sure to update its references in runtime/src/lib.rs
-/// If you remove this file, you can remove those references
-
-/// For more guidance on Substrate modules, see the example module
-/// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
-
 use support::{ decl_module, decl_storage, decl_event, dispatch::Result,
   StorageValue, StorageMap, ensure, traits::{ Currency, ReservableCurrency } };
 use { system::ensure_signed, timestamp };
@@ -15,7 +6,6 @@ use { system::ensure_signed, timestamp };
 use rstd::prelude::*;
 use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
-// use core::convert::{ TryInto, TryFrom };
 // use runtime_io;
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
@@ -360,7 +350,6 @@ decl_module! {
     }
 
     pub fn close_auction_and_tx(_origin, auction_id: T::Hash) -> Result {
-
       ensure!(<Auctions<T>>::exists(auction_id), "The auction does not exist");
       let now = <timestamp::Module<T>>::get();
       let auction = Self::auctions(auction_id);
@@ -655,22 +644,52 @@ mod tests {
 
   type CatAuction = super::Module<CatAuctionTest>;
 
+  const KITTY_NAMES: [&'static str; 3] = [
+    "lovely-kitty01",
+    "lovely-kitty02",
+    "lovely-kitty03",
+  ];
+
+  const ALICE: u64 = 10;
+  const BOB: u64 = 20;
+  const CHARLES: u64 = 20;
+
+  // construct genesis storage
   fn build_ext() -> TestExternalities<Blake2Hasher> {
     let mut t = system::GenesisConfig::<CatAuctionTest>::default()
       .build_storage().unwrap().0;
     t.extend(balances::GenesisConfig::<CatAuctionTest>::default()
       .build_storage().unwrap().0);
 
-    // construct genesis data here
 
     t.into()
   }
 
   #[test]
   fn it_works() {
+    // Test case to test all test mocks are setup properly
     with_externalities(&mut build_ext(), || {
       assert!(true);
     })
-  }
+  } // finish test `it_works`
+
+  #[test]
+  fn can_create_kitty() {
+    with_externalities(&mut build_ext(), || {
+      let kitty_name_in_hex = KITTY_NAMES[0].as_bytes().to_vec();
+      assert_ok!(CatAuction::create_kitty(Origin::signed(ALICE), kitty_name_in_hex));
+      assert_eq!(CatAuction::kitties_count(), 1);
+      assert_eq!(CatAuction::owner_kitties_count(ALICE), 1);
+
+      let kitty_id = CatAuction::kitty_array(0);
+      assert_eq!(CatAuction::owner_kitties((ALICE, 0)), kitty_id);
+
+      // test kitty object data is consistent
+      let kitty = CatAuction::kitties(kitty_id);
+      assert_eq!(kitty.in_auction, false);
+      assert_eq!(kitty.owner, Some(ALICE));
+      assert_eq!(kitty.owner_pos, Some(0));
+    })
+  } // finish test `can_start_auction`
 
 }

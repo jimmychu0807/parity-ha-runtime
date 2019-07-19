@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -x
+
+cargo test -p ha-runtime cat_auction
