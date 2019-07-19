@@ -6,7 +6,7 @@ use { system::ensure_signed, timestamp };
 use rstd::prelude::*;
 use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
-// use runtime_io;
+use runtime_io::{ self };
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
 
@@ -652,15 +652,24 @@ mod tests {
 
   const ALICE: u64 = 10;
   const BOB: u64 = 20;
-  const CHARLES: u64 = 20;
+  const CHARLES: u64 = 30;
+  const DAVE: u64 = 40;
+  const EVE: u64 = 50;
+
+  const BASE_PRICE: u64 = 10000;
+  const INI_BALANCE: u64 = 100000;
 
   // construct genesis storage
   fn build_ext() -> TestExternalities<Blake2Hasher> {
-    let mut t = system::GenesisConfig::<CatAuctionTest>::default()
-      .build_storage().unwrap().0;
-    t.extend(balances::GenesisConfig::<CatAuctionTest>::default()
-      .build_storage().unwrap().0);
+    let mut t = system::GenesisConfig::<CatAuctionTest>::default().build_storage().unwrap().0;
 
+    t.extend(balances::GenesisConfig::<CatAuctionTest> {
+      // this is where you specify the genesis data structure
+      balances: vec![
+        (ALICE, INI_BALANCE), (BOB, INI_BALANCE), (CHARLES, INI_BALANCE),
+        (DAVE, INI_BALANCE), (EVE, INI_BALANCE) ],
+      ..Default::default()
+    }.build_storage().unwrap().0);
 
     t.into()
   }
@@ -678,6 +687,7 @@ mod tests {
     with_externalities(&mut build_ext(), || {
       let kitty_name_in_hex = KITTY_NAMES[0].as_bytes().to_vec();
       assert_ok!(CatAuction::create_kitty(Origin::signed(ALICE), kitty_name_in_hex));
+
       assert_eq!(CatAuction::kitties_count(), 1);
       assert_eq!(CatAuction::owner_kitties_count(ALICE), 1);
 
@@ -692,4 +702,74 @@ mod tests {
     })
   } // finish test `can_start_auction`
 
+  #[test]
+  fn can_start_auction_n_bid_n_close() {
+    with_externalities(&mut build_ext(), || {
+      let kitty_name_in_hex = KITTY_NAMES[0].as_bytes().to_vec();
+      assert_ok!(CatAuction::create_kitty(Origin::signed(ALICE), kitty_name_in_hex));
+
+      let kitty_id = CatAuction::kitty_array(0);
+      let time_buffer = 5; // 5s for time buffer
+      let end_time = <timestamp::Module<CatAuctionTest>>::get() +
+        AUCTION_MIN_DURATION + time_buffer;
+
+      assert_ok!(CatAuction::start_auction(Origin::signed(ALICE), kitty_id, end_time, BASE_PRICE));
+
+      // Test auction:
+      //   1. auctions_count
+      assert_eq!(CatAuction::auctions_count(), 1);
+
+      let auction_id = CatAuction::auction_array(0);
+      let abal_b4_bid = <balances::Module<CatAuctionTest>>::free_balance(ALICE);
+      let bbal_b4_bid = <balances::Module<CatAuctionTest>>::free_balance(BOB);
+
+      // Bob bids in the auction
+      assert_ok!(CatAuction::bid(Origin::signed(BOB), auction_id, BASE_PRICE));
+      <timestamp::Module<CatAuctionTest>>::set_timestamp(end_time);
+
+      // Close the auction
+      assert_ok!(CatAuction::close_auction_and_tx(Origin::INHERENT, auction_id));
+
+      // Check
+      //   1. auction object
+      //   2. payment is transferred
+      //   3. kitty object
+      //   4. OwnerKittiesCount (A, B)
+      //   5. OwnerKitties (A, B)
+
+      // check #1: auction object
+      let auction = CatAuction::auctions(auction_id);
+      assert_eq!(auction.status, AuctionStatus::Closed);
+      let auction_tx = auction.tx.unwrap();
+      assert_eq!(auction_tx.winner, BOB);
+      assert_eq!(auction_tx.tx_price, BASE_PRICE);
+
+      // check #2: payment is transferred
+      let abal_after_bid = <balances::Module<CatAuctionTest>>::free_balance(ALICE);
+      let bbal_after_bid = <balances::Module<CatAuctionTest>>::free_balance(BOB);
+      assert!(abal_after_bid - abal_b4_bid >= BASE_PRICE);
+      assert!(bbal_b4_bid - bbal_after_bid >= BASE_PRICE);
+
+      // check #3: check kitty object
+      let kitty = CatAuction::kitties(kitty_id);
+      assert!(!kitty.in_auction);
+      assert_eq!(kitty.owner, Some(BOB));
+      assert_eq!(kitty.owner_pos, Some(0));
+
+      // check #4: check OwnerKittiesCount
+      assert_eq!(CatAuction::owner_kitties_count(ALICE), 0);
+      assert_eq!(CatAuction::owner_kitties_count(BOB), 1);
+
+      // check #5: check OwnerKitties
+      assert!(!<OwnerKitties<CatAuctionTest>>::exists((ALICE, 0)));
+      assert!(<OwnerKitties<CatAuctionTest>>::exists((BOB, 0)));
+      assert_eq!(CatAuction::owner_kitties((BOB, 0)), kitty_id);
+    });
+  }
+
+  // TODO: Write test cases:
+  //   1. with alice, bob having more than one kitten, and in auction to test
+  //      the kitty switching logic when auction close and tx happens
+  //   2. with alice starting an auction, Bob, Charles, Dave, and Eve come bid
+  //      with each one out-bidding each others, and then auction closed.
 }
