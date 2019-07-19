@@ -3,7 +3,7 @@
 CLEAN_FLAG = ARGV[0];
 
 if (CLEAN_FLAG == "clean")
-  system("./target/release/chain01 purge-chain --dev && ./target/release/chain01 --dev");
+  system("./target/release/ha purge-chain --dev && ./target/release/ha --dev");
 else
-  system("./target/release/chain01 --dev");
+  system("./target/release/ha --dev");
 end

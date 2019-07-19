@@ -613,7 +613,7 @@ mod tests {
 
   // Manually called this which is called in `contstruct_runtime`
   impl_outer_origin! {
-    pub enum Origin for KittiesTest {}
+    pub enum Origin for CatAuctionTest {}
   }
 
   #[derive(Clone, Eq, PartialEq)]
@@ -634,15 +634,10 @@ mod tests {
   }
 
   impl balances::Trait for CatAuctionTest {
-    /// The type for recording an account's balance.
-    type Balance = u128;
-    /// What to do if an account's free balance gets zeroed.
+    type Balance = u64;
     type OnFreeBalanceZero = ();
-    /// What to do if a new account is created.
-    type OnNewAccount = Indices;
-    /// The uniquitous event type.
-    type Event = Event;
-
+    type OnNewAccount = ();
+    type Event = ();
     type TransactionPayment = ();
     type DustRemoval = ();
     type TransferPayment = ();
@@ -651,7 +646,7 @@ mod tests {
   impl timestamp::Trait for CatAuctionTest {
     /// A timestamp: seconds since the unix epoch.
     type Moment = u64;
-    type OnTimestampSet = Aura;
+    type OnTimestampSet = ();
   }
 
   impl super::Trait for CatAuctionTest {

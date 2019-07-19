@@ -1,13 +1,13 @@
 [profile.release]
 lto = true
 panic = 'abort'
-[dependencies.chain01-runtime]
+[dependencies.ha-runtime]
 default-features = false
 path = '..'
 
 [features]
 default = []
-std = ['chain01-runtime/std']
+std = ['ha-runtime/std']
 
 [lib]
 crate-type = ['cdylib']
@@ -18,5 +18,5 @@ members = []
 [package]
 authors = ['Parity Technologies <admin@parity.io>']
 edition = '2018'
-name = 'chain01-runtime-wasm'
+name = 'ha-runtime-wasm'
 version = '1.0.0'

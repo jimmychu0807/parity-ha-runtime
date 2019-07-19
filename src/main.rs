@@ -14,9 +14,9 @@ fn run() -> cli::error::Result<()> {
 		name: "Collectible on Auction",
 		commit: env!("VERGEN_SHA_SHORT"),
 		version: env!("CARGO_PKG_VERSION"),
-		executable_name: "chain01",
+		executable_name: "ha",
 		author: "Jimmy Chu",
-		description: "chain01",
+		description: "ha",
 		support_url: "support.anonymous.an",
 	};
 	cli::run(::std::env::args(), cli::Exit, version)

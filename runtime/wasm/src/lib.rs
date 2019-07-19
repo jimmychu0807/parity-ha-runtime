@@ -2,4 +2,4 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use chain01_runtime::*;
+pub use ha_runtime::*;
