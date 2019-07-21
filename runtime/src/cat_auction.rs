@@ -769,7 +769,7 @@ mod tests {
 
   // TODO: Write test cases:
   //   1. with alice, bob having more than one kitten, and in auction to test
-  //      the kitty switching logic when auction close and tx happens
+  //      the kitty switching logic when auction closes and tx happens
   //   2. with alice starting an auction, Bob, Charles, Dave, and Eve come bid
   //      with each one out-bidding each others, and then auction closed.
 }
