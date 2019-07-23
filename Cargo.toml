@@ -1,3 +1,20 @@
+[package]
+authors = ['Parity Technologies <admin@parity.io>']
+build = 'build.rs'
+edition = '2018'
+name = 'ha'
+version = '1.0.0'
+
+[profile.release]
+panic = 'unwind'
+
+[[bin]]
+name = 'ha'
+path = 'src/main.rs'
+
+[build-dependencies]
+vergen = '3'
+
 [dependencies]
 error-chain = '0.12'
 exit-future = '0.1'
@@ -65,19 +82,3 @@ rev = '783ca1892892454e05e234cda5f7a2e42a54461e'
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-transaction-pool'
 rev = '783ca1892892454e05e234cda5f7a2e42a54461e'
-
-[build-dependencies]
-vergen = '3'
-
-[[bin]]
-name = 'ha'
-path = 'src/main.rs'
-
-[package]
-authors = ['Parity Technologies <admin@parity.io>']
-build = 'build.rs'
-edition = '2018'
-name = 'ha'
-version = '1.0.0'
-[profile.release]
-panic = 'unwind'

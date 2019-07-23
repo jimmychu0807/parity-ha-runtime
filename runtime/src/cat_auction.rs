@@ -6,7 +6,7 @@ use { system::ensure_signed, timestamp };
 use rstd::prelude::*;
 use runtime_primitives::traits::{ As, /*CheckedAdd, CheckedDiv, CheckedMul,*/ Hash };
 use parity_codec::{ Encode, Decode };
-use runtime_io::{ self };
+// use runtime_io::{ self };
 
 pub type StdResult<T> = rstd::result::Result<T, &'static str>;
 
