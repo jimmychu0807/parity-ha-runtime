@@ -204,7 +204,7 @@ decl_module! {
         status: AuctionStatus::Ongoing,
 
         topmost_bids: Vec::new(),
-        price_to_topmost: <T::Balance as As<u64>>::sa(base_price.as_() - 1),
+        price_to_topmost: base_price,
         display_bids: Vec::new(),
         display_bids_last_update: now,
 
@@ -321,7 +321,7 @@ decl_module! {
       <balances::Module<T>>::reserve(&bidder, to_reserve)?;
 
       // update auction bid info inside if higher than topmost
-      if bid_price > auction.price_to_topmost {
+      if bid_price >= auction.price_to_topmost {
         let _ = Self::_update_auction_topmost_bids(&auction_id, &bid.id);
       }
 
@@ -495,7 +495,7 @@ impl<T: Trait> Module<T> {
     let auction = Self::auctions(auction_id);
     let bid = Self::bids(bid_id);
 
-    if bid.price <= auction.price_to_topmost {
+    if bid.price < auction.price_to_topmost {
       return Ok(());
     }
 
@@ -519,7 +519,7 @@ impl<T: Trait> Module<T> {
       // update the price_to_topmost. Only update when the vector is filled
       if auction.topmost_bids.len() >= TOPMOST_BIDS_LEN {
         let bid = Self::bids(auction.topmost_bids[TOPMOST_BIDS_LEN - 1]);
-        auction.price_to_topmost = bid.price;
+        auction.price_to_topmost = bid.price + <T::Balance as As<u64>>::sa(1);
       }
     });
 
