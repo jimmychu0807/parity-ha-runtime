@@ -1,10 +1,3 @@
-- Complete the whole auction lifecycle of a kitty - 20190705
-  L remove kitty creation function, and create 20 kitties for Alice at
-    genesis block
-- display kitties in auction on UI w. react       - 20190708
-- start working on the node listener & cache      - 20190711
-  L revert the UI to query the off-chain cache    - 20190713
-
 On the runtime:
   * Seller can list his kitty to be in auction with a base price, and specify the auction period (with the minimum auction period specified in runtime).
   * Seller can change his mind and cancel the auction if no one has bidden on the kitty

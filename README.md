@@ -1,68 +1,59 @@
-# ha
+# Parity HA Runtime
 
-A new SRML-based Substrate node, ready for hacking.
+- [Video demo](https://youtu.be/Ru7_BeX1a1g)
+- [Substrate Runtime code repository](https://github.com/jimmychu0807/parity-ha-runtime)
+- [React frontend code repository](https://github.com/jimmychu0807/parity-ha-ui)
 
-# Building
+### Overall
 
-Install Rust:
+This is the substrate runtime of kitty auction, inspired from the [substrate collectibles tutorial](https://substrate.dev/substrate-collectables-workshop/).
 
-```bash
-curl https://sh.rustup.rs -sSf | sh
-```
+This runtime implements the following features:
 
-Install required tools:
+  - *Creating a new kitty* - taking parameters of: 1) kitty name  
+    A new kitty is created.
 
-```bash
-./scripts/init.sh
-```
+  - *Creating a new auction* - taking parameters of: 1) kitty ID, 2) kitty base price, 3) auction end time  
+    A new auction is created.
 
-Build the WebAssembly binary:
+  - *Cancelling an auction*  
+    When no one has placed a bid yet the auction is cancelled.
 
-```bash
-./scripts/build.sh
-```
+  - *Bidding in an ongoing auction* - taking parameters of: 1) auction ID, 2) bidding price.    
+    Either a new bid is placed in the auction, or a bid has increased his previous bidding offer. When a bid is successfully placed, the money of the bidder is held in reserve.
 
-Build all native code:
+  - *Closing an auction*  
+    When the auction ending time is reached, anyone can call this function to close the auction. If conditions are met, the kitty is transferred to the bidder and money from the winner transferred to the original kitty owner. Bids from other bidders are returned.
 
-```bash
-cargo build
-```
+There are features planned during the design phase but not really implemented/tested:
 
-# Run
+  - The current bidding ranking of an auction is not known to the public. The bidding ranking is only updated regularly via function `update_auction_display_bids` being called from another service.
 
-You can start a development chain with:
+  - Logic of an auction winner paying the second highest bid.
 
-```bash
-cargo run -- --dev
-```
+Original design requirements can be seen [here](docs/requirements.txt).
 
-Detailed logs may be shown by running the node with the following environment variables set: `RUST_LOG=debug RUST_BACKTRACE=1 cargo run -- --dev`.
+### Implementation notes
 
-If you want to see the multi-node consensus algorithm in action locally, then you can create a local testnet with two validator nodes for Alice and Bob, who are the initial authorities of the genesis chain that have been endowed with testnet units. Give each node a name and expose them so they are listed on the Polkadot [telemetry site](https://telemetry.polkadot.io/#/Local%20Testnet). You'll need two terminal windows open.
+  - Within the Kitty object, there are `owner`, and `owner_pos` attributes. With hindsight, I think this is not a good design. Everytime when a kitty is transferred, I now need to update the Kitty object also.
 
-We'll start Alice's substrate node first on default TCP port 30333 with her chain database stored locally at `/tmp/alice`. The bootnode ID of her node is `QmQZ8TjTqeDj3ciwr93EJ95hxfDsb9pEYDizUAbWpigtQN`, which is generated from the `--node-key` value that we specify below:
+  - To me, what `decl_storage!` is to the runtime is like what a database to a backend. When we need an index to lookup for an object or a new relation between objects, we need a storage item. The more relations we have, the more storage items we need. It soon becomes a hassle (and error-prone) to keep track of what need to be updated when we want to update these relations.
 
-```bash
-cargo run -- \
-  --base-path /tmp/alice \
-  --chain=local \
-  --alice \
-  --node-key 0000000000000000000000000000000000000000000000000000000000000001 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
-```
+### Deployment notes
 
-In the second terminal, we'll start Bob's substrate node on a different TCP port of 30334, and with his chain database stored locally at `/tmp/bob`. We'll specify a value for the `--bootnodes` option that will connect his node to Alice's bootnode ID on TCP port 30333:
+  - The substrate runtime is deployed in an external server run with `--dev` flag, so testing accounts exist.
+  - Nginx is configured as proxy to take external `wss` connections and forward them to substrate socket that listen to localhost with `ws` protocol.
 
-```bash
-cargo run -- \
-  --base-path /tmp/bob \
-  --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/QmQZ8TjTqeDj3ciwr93EJ95hxfDsb9pEYDizUAbWpigtQN \
-  --chain=local \
-  --bob \
-  --port 30334 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
-```
+### Testing notes
 
-Additional CLI usage options are available and may be shown by running `cargo run -- --help`.
+  - A manual testing scenario is written [here](#1).
+  - Test cases are written on:
+    - a kitty can be created,
+    - auction can be created, accept bid, and allowed closed, with transaction occured.
+
+### Further Enhancement
+
+  - Refine the object design
+  - Kitty name be stored in external decentralized storage (IPFS?)
+  - Kitty has an image that can be uploaded by user and stored in external decentralized storage (IPFS?)
+  - Allow user to create an account and login
