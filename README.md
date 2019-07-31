@@ -1,5 +1,6 @@
 # Parity HA Runtime
 
+- [Demo site](https://kittyauction.dapp.hkwtf.com/)
 - [Video demo](https://youtu.be/Ru7_BeX1a1g)
 - [Substrate Runtime code repository](https://github.com/jimmychu0807/parity-ha-runtime)
 - [React frontend code repository](https://github.com/jimmychu0807/parity-ha-ui)
