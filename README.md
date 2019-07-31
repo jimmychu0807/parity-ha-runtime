@@ -31,7 +31,7 @@ There are features planned during the design phase but not really implemented/te
 
   - Logic of an auction winner paying the second highest bid.
 
-Original design requirements can be seen [here](docs/requirements.txt).
+Original design requirements can be seen [here](docs/requirements.md).
 
 ### Implementation notes
 
@@ -46,7 +46,7 @@ Original design requirements can be seen [here](docs/requirements.txt).
 
 ### Testing notes
 
-  - A manual testing scenario is written [here](#1).
+  - A manual testing scenario is written [here](https://github.com/jimmychu0807/parity-ha-runtime/issues/1).
   - Test cases are written on:
     - a kitty can be created,
     - auction can be created, accept bid, and allowed closed, with transaction occured.
