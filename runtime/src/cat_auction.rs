@@ -17,9 +17,9 @@ pub trait Trait: timestamp::Trait + balances::Trait {
 
 // store the 3 topmost bids, and they cannot be withdrawn
 const TOPMOST_BIDS_LEN: usize = 3;
-// auction duration has to be at least 10 mins
+// auction duration has to be at least 3 mins
 const AUCTION_MIN_DURATION: u64 = 3 * 60;
-// TODO: modify the following to at least 5 mins when run in production
+// modify the following to at least 1 min when run in production
 const DISPLAY_BIDS_UPDATE_PERIOD: u64 = 1 * 60;
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug)]
@@ -115,7 +115,6 @@ decl_storage! {
     AuctionBidderBids get(auction_bidder_bids): map (T::Hash, T::AccountId) => T::Hash;
 
     Nonce: u64 = 0;
-    // if you want to initialize value in storage, use genesis block
   }
 }
 
@@ -183,7 +182,7 @@ decl_module! {
       // check #3
       let now = <timestamp::Module<T>>::get();
       ensure!(end_time.clone().as_() > AUCTION_MIN_DURATION + now.clone().as_(),
-        "End time cannot be set less than 5 mins from current time");
+        "End time cannot be set less than 3 mins from current time");
 
       // check #4
       ensure!(base_price > <T::Balance as As<u64>>::sa(0),
@@ -227,9 +226,9 @@ decl_module! {
       let sender = ensure_signed(origin)?;
 
       // check:
-      //   1. only the auction_admin (which is kitty owner) can cancel the auction
-      //   2. the now time is before auction end_time
-      //   3. No one has bid in the auction yet
+      //   1. only the auction_admin (which is the kitty owner) can cancel the auction
+      //   2. the current time is before the auction end time
+      //   3. No one has placed bid in the auction yet
 
       // check #1:
       ensure!(<Auctions<T>>::exists(auction_id), "Auction does not exist");
@@ -283,17 +282,24 @@ decl_module! {
       //write #1
       let to_reserve: T::Balance;
       let bid = if <AuctionBidderBids<T>>::exists((auction_id, bidder.clone())) {
+
+        // Overwriting on his own previous bid
+
         let bid = Self::bids(Self::auction_bidder_bids((auction_id, bidder.clone())));
         // check the current bid is larger than its previous bid
         ensure!(bid_price > bid.price, "New bid has to be larger than your previous bid");
 
-        to_reserve = bid_price - bid.price;
+        to_reserve = bid_price - bid.price;  // only reserve the difference from his previous bid
         <Bids<T>>::mutate(bid.id, |bid| {
           bid.price = bid_price;
           bid.last_update = now;
         });
-        bid
+
+        bid // bid returned
       } else {
+
+        // This is a new bid for this bidder
+
         let bid = Bid {
           id: Self::_gen_random_hash(&bidder)?,
           auction_id,
@@ -332,7 +338,7 @@ decl_module! {
     }
 
     pub fn update_auction_display_bids(_origin, auction_id: T::Hash) -> Result {
-      // no need to verify caller
+      // no need to verify caller, anyone can call this method
 
       // check:
       //   1. auction existed
@@ -358,12 +364,15 @@ decl_module! {
       ensure!(now >= auction.end_time, "The auction is not expired yet.");
 
       // write
-      //   1. check if there is a highest bidder, if yes
-      //        L 1) unreserve his money, 2) transfer his money to kitty_owner, 3) update kitty to the bidder
-      //        L emit an event saying an auction with aid has a transaction, of kitty_id from AccountId to AccountId
+      //   1. check if there is a highest bidder. If yes
+      //     - unreserve his money,
+      //     - transfer his money to kitty_owner
+      //     - update kitty to the bidder
+      //     - emit an event saying an auction with aid has a transaction, of kitty_id
+      //       from AccountId to AccountId
       //   2. unreserve all fund from the rest of the bidders
       //   3. set auction status to Closed
-      //        L emit an event saying auction closed
+      //     - emit an event saying auction closed
 
       // #1. Transact the kitty and money between winner and kitty owner
       let mut winner_opt: Option<T::AccountId> = None;
@@ -399,21 +408,21 @@ decl_module! {
           }?;
         }
       } else {
-        // No kitty ownership transfer is made. Resume the kitty to the owner
+        // No one bid. So no kitty ownership transfer is made. Resume the kitty to the owner
         <Kitties<T>>::mutate(Self::auctions(auction_id).kitty_id, |kitty| {
           kitty.in_auction = false;
         });
       }
 
-      // #2. unreserve all fund from the rest of the bidders
+      // #2. unreserve funds for other bidders
       let bids_count = <AuctionBidsCount<T>>::get(auction_id);
       (0..bids_count)
-        .map(|i| Self::bids( Self::auction_bids((auction_id, i)) ) )
-        .filter(|bid| match &winner_opt {
+        .map(|i| Self::bids( Self::auction_bids((auction_id, i)) ) )  // get the bids
+        .filter(|bid| match &winner_opt {                             // filter out the auction winner
           Some(winner) => *winner != bid.bidder,
           None => true
         })
-        .for_each(|bid| {
+        .for_each(|bid| {                                             // unreserve funds for other bidders
           <balances::Module<T>>::unreserve(&bid.bidder, bid.price);
         });
 
@@ -423,7 +432,7 @@ decl_module! {
         auction.tx = auction_tx_opt;
       });
 
-      // #4. update the display bid
+      // #4. update the display bid upon closing
       let _ = Self::_update_auction_display_bids_nocheck(auction_id, false);
 
       Self::deposit_event(RawEvent::AuctionClosed(auction_id));
@@ -457,18 +466,17 @@ impl<T: Trait> Module<T> {
     if let Some(owner_id) = owner {
       kitty.owner = Some(owner_id.clone());
       kitty.owner_pos = Some(Self::owner_kitties_count(owner_id));
+
+      // update OwnerKitties storage...
+      <OwnerKitties<T>>::insert((owner_id.clone(), kitty.owner_pos.unwrap()), &kitty_id);
+      <OwnerKittiesCount<T>>::mutate(owner_id, |cnt| *cnt += 1);
     }
 
-    // update corresponding storage
+    // update kitty-related storages
     <Kitties<T>>::insert(&kitty_id, kitty.clone());
     <KittiesArray<T>>::insert(Self::kitties_count(), &kitty_id);
     <KittiesCount<T>>::mutate(|cnt| *cnt += 1);
 
-    // update OwnerKitties storage...
-    if let Some(owner_id) = owner {
-      <OwnerKitties<T>>::insert((owner_id.clone(), kitty.owner_pos.unwrap()), &kitty_id);
-      <OwnerKittiesCount<T>>::mutate(owner_id, |cnt| *cnt += 1);
-    }
     Ok(())
   }
 
@@ -516,7 +524,7 @@ impl<T: Trait> Module<T> {
       auction.topmost_bids = auction.topmost_bids.clone()
         .into_iter().take(TOPMOST_BIDS_LEN).collect();
 
-      // update the price_to_topmost. Only update when the vector is filled
+      // update the price_to_topmost. Only update it when the vector is filled
       if auction.topmost_bids.len() >= TOPMOST_BIDS_LEN {
         let bid = Self::bids(auction.topmost_bids[TOPMOST_BIDS_LEN - 1]);
         auction.price_to_topmost = bid.price + <T::Balance as As<u64>>::sa(1);
@@ -533,7 +541,7 @@ impl<T: Trait> Module<T> {
       auction.display_bids = auction.topmost_bids.clone();
       auction.display_bids_last_update = now.clone();
     });
-    // emit event if auction display bids updated
+    // emit event depends on the passed-in flag
     if ev {
       let auction = Self::auctions(auction_id);
       Self::deposit_event(RawEvent::UpdateDisplayedBids(auction_id, auction.display_bids));
@@ -554,7 +562,7 @@ impl<T: Trait> Module<T> {
     let kitty_cnt = Self::owner_kitties_count(&orig_kitty_owner);
     let kitty_owner_pos = kitty.owner_pos.unwrap();
 
-    // Two cases: when the kitty is at the last position in OwnerKitties storage, or not
+    // Two cases: when 1) the kitty is at the last position in OwnerKitties storage, 2) or not
     if kitty_owner_pos == kitty_cnt - 1 {
       // transferred kitty is at the last position, just need to remove that from OwnerKitties
       <OwnerKitties<T>>::remove((orig_kitty_owner.clone(), kitty_cnt - 1));
